@@ -1,3 +1,4 @@
+using System.Text;
 using Koine.Compiler.Ast;
 using Koine.Compiler.Diagnostics;
 
@@ -395,6 +396,74 @@ internal static class CqrsValidator
     /// </summary>
     private static string Kebab(string name) =>
         string.Join('-', IdentifierWords.Split(name, splitAfterDigit: true)).ToLowerInvariant();
+
+    /// <summary>
+    /// The KOI1211 collision KEY for a route template (#1745): the criterion two templates are compared
+    /// under is not the raw string but what ASP.NET's router actually matches — literal text
+    /// case-insensitively, and a <c>{token}</c>'s <i>position</i> rather than its name or constraint. So
+    /// <c>/Orders</c> normalizes like <c>/orders</c>, and <c>/orders/{id}</c> like <c>/orders/{orderId}</c>:
+    /// literal text is lowercased; each <c>{token}</c> becomes <c>{</c> + an optional <c>*</c> (either a
+    /// <c>*</c> or <c>**</c> catch-all collapses to one) + its zero-based occurrence index + an optional
+    /// <c>?</c> (present anywhere in the token) + <c>}</c> — the name and any <c>:constraint</c> are
+    /// discarded. <c>{{</c>/<c>}}</c> escape a literal brace exactly as <see cref="DescribeRouteProblem"/>
+    /// reads them (<see cref="RouteTemplate.IsEscapedBrace"/> is the one piece of that walk shared, since
+    /// it lives in <c>Ast/</c> — reachable from here — rather than <c>Koine.Emit.Common</c>, which is not).
+    /// An unclosed <c>{</c> is not this method's job to reject (KOI1208 already does): the remainder is
+    /// copied through as-is so the walk always terminates without throwing.
+    /// </summary>
+    internal static string NormalizeRoute(string route)
+    {
+        var result = new StringBuilder(route.Length);
+        var tokenIndex = 0;
+
+        for (var i = 0; i < route.Length; i++)
+        {
+            var c = route[i];
+
+            if ((c == '{' || c == '}') && RouteTemplate.IsEscapedBrace(route, i, c))
+            {
+                result.Append(c).Append(c);
+                i++;
+                continue;
+            }
+
+            if (c != '{')
+            {
+                result.Append(char.ToLowerInvariant(c));
+                continue;
+            }
+
+            var close = route.IndexOf('}', i + 1);
+            if (close < 0)
+            {
+                result.Append(route, i, route.Length - i);
+                return result.ToString();
+            }
+
+            var token = route[(i + 1)..close];
+            var isCatchAll = token.Length > 0 && token[0] == '*';
+            var trimmed = token.TrimStart('*');
+            var isOptional = trimmed.Contains('?');
+
+            result.Append('{');
+            if (isCatchAll)
+            {
+                result.Append('*');
+            }
+
+            result.Append(tokenIndex++);
+            if (isOptional)
+            {
+                result.Append('?');
+            }
+
+            result.Append('}');
+
+            i = close;
+        }
+
+        return result.ToString();
+    }
 
     /// <summary>
     /// The rule a route override breaks, phrased to complete "route override 'x' on <c>subject</c> …",

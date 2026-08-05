@@ -1,5 +1,6 @@
 using Koine.Compiler.Ast;
 using Koine.Compiler.Diagnostics;
+using Koine.Compiler.Semantics;
 using Koine.Compiler.Services;
 
 namespace Koine.Compiler.Tests;
@@ -1895,4 +1896,30 @@ public class R19ApiAnnotationsTests
         endpoints.ShouldContain("[Microsoft.AspNetCore.Mvc.FromRoute(Name = \"event\")] string @event");
         endpoints.ShouldContain("query with { Event = @event }");
     }
+
+    // ---- KOI1211: route normalization (#1745) --------------------------------
+
+    /// <summary>
+    /// The normalized route KEY (#1745) that makes two templates differing only in letter case or
+    /// route-parameter naming compare equal: literal text lowercased, each <c>{token}</c> rewritten to
+    /// a positional placeholder (name and <c>:constraint</c> discarded, <c>*</c>/<c>**</c> catch-alls
+    /// collapsed to one <c>*</c>, a <c>?</c> anywhere in the token preserved), <c>{{</c>/<c>}}</c> escapes
+    /// left alone, and an unclosed <c>{</c> copied through verbatim rather than throwing.
+    /// </summary>
+    [Theory]
+    [InlineData("/Orders", "/orders")]
+    [InlineData("/orders/{id}", "/orders/{0}")]
+    [InlineData("/orders/{orderId}", "/orders/{0}")]
+    [InlineData("/orders/{id:int}", "/orders/{0}")]
+    [InlineData("/orders/{id?}", "/orders/{0?}")]
+    [InlineData("/orders/{id?:int}", "/orders/{0?}")]
+    [InlineData("/orders/{*path}", "/orders/{*0}")]
+    [InlineData("/orders/{**path}", "/orders/{*0}")]
+    [InlineData("/orders/{id}/lines/{lineId}", "/orders/{0}/lines/{1}")]
+    [InlineData("/lit/{{brace}}", "/lit/{{brace}}")]
+    [InlineData("/", "/")]
+    [InlineData("", "")]
+    [InlineData("/orders/{id", "/orders/{id")]
+    public void Normalize_route_rewrites_case_and_route_parameters(string route, string expected) =>
+        CqrsValidator.NormalizeRoute(route).ShouldBe(expected);
 }
