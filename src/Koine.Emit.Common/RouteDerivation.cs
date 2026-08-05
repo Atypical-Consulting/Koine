@@ -75,8 +75,8 @@ public static class RouteDerivation
     /// <c>in: query</c> parameters or a <c>requestBody</c>) — one source of truth so the emitted C# and
     /// the document it describes can never disagree about which verbs take a body.
     /// </summary>
-    public static readonly HashSet<string> BodylessVerbs =
-        new(StringComparer.OrdinalIgnoreCase) { "GET", "DELETE", "HEAD", "OPTIONS", "TRACE", "CONNECT" };
+    public static readonly IReadOnlySet<string> BodylessVerbs =
+        new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "GET", "DELETE", "HEAD", "OPTIONS", "TRACE", "CONNECT" };
 
     /// <summary>
     /// A command → <c>POST /{entity}/{command}</c>, its parameters the request body — unless the command

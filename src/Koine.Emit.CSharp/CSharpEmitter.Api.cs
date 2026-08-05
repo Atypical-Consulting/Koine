@@ -278,9 +278,10 @@ public sealed partial class CSharpEmitter
         var i3 = i2 + Indent;
 
         // Route-bindable criteria (#1748): the same lifting WriteMutationEndpoint applies to a command's
-        // request, mirrored onto the [AsParameters] query record. A query has no aggregate identity, so
-        // every RouteTokenTarget here is Member or Unbound (never Identity — RouteDerivation.ForQuery
-        // never resolves one) — identityProperty is passed null accordingly.
+        // request, mirrored onto the query record regardless of its own [AsParameters]/[FromBody]
+        // binding (#1961). A query has no aggregate identity, so every RouteTokenTarget here is Member or
+        // Unbound (never Identity — RouteDerivation.ForQuery never resolves one) — identityProperty is
+        // passed null accordingly.
         (string routeParams, List<string> rebinds) = BuildRouteTokenBindings(
             body, i2, info.TokenBindings, identityProperty: null, typeMapper, index);
 
