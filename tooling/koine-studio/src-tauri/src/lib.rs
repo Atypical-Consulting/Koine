@@ -1534,6 +1534,30 @@ fn resolve_in(folder: &str, rel_path: &str) -> Result<PathBuf, String> {
         .map_err(|e| escape_message(rel_path, &e))
 }
 
+/// The token handed back to the webview for a path [`resolve_in`] just proved contained.
+///
+/// **Resolve for the WRITE, re-anchor for the ANSWER.** `resolve_in` returns the CANONICAL path —
+/// symlinks followed — which is exactly what the filesystem call must use and exactly what the caller
+/// must not be handed back. `FsEntry::token` is *identity* in the frontend, and the frontend decides
+/// which opened root a token belongs to with a **string-prefix** test (`rootOfToken` in
+/// `src/shell/workspaceController.ts`, `isUnderRoot` in `src/host/tauri.ts`). A canonical path fails
+/// that test wherever the opened folder is reached through a link — macOS puts every temp-dir
+/// workspace behind `/var` -> `/private/var`, so `create_file` answers `/private/var/…` for a file
+/// `list_entries` calls `/var/…` — and on Windows it fails for EVERY call, because `canonicalize`
+/// returns the `\\?\` verbatim form no other token carries. A token that matches no root belongs to
+/// no workspace: explorer placement, dirty-tab tracking and session restore all mis-fire on it.
+///
+/// This is only ever reached once containment has already been decided, and it re-derives nothing
+/// that decision rested on: `rel` is the same relative path the primitive accepted, and the join is
+/// purely lexical. It is emphatically NOT the `folder.join(rel_path)` that `resolve_in` warns
+/// against — that one is used to WRITE, this one is only ever shown.
+fn caller_token(folder: &str, rel: &std::path::Path) -> String {
+    std::path::Path::new(folder)
+        .join(rel)
+        .to_string_lossy()
+        .into_owned()
+}
+
 /// Flatten a [`PathEscape`] into the `String` error these commands return.
 ///
 /// It names WHICH rule the path broke, but echoes back only the caller's own relative path — never
@@ -1654,12 +1678,14 @@ fn list_dir(dir: String, rel_path: String) -> Result<Vec<FsEntry>, String> {
             .and_then(|n| n.to_str())
             .unwrap_or_default()
             .to_string();
-        let rel = path
-            .strip_prefix(root)
-            .unwrap_or(&path)
-            .to_string_lossy()
-            .replace('\\', "/");
-        let token = path.to_string_lossy().into_owned();
+        let rel_os = path.strip_prefix(root).unwrap_or(&path);
+        let rel = rel_os.to_string_lossy().replace('\\', "/");
+        // The rel_path is computed against the RESOLVED root (see above) but the token is re-anchored
+        // on the caller's own `dir` string, because the frontend treats a token as identity and
+        // matches it against the opened root by string prefix — see `caller_token`. Built from the
+        // OS-native relative path rather than the forward-slashed `rel`, so a Windows token keeps the
+        // separators every other token in the tree uses.
+        let token = caller_token(&dir, rel_os);
         if file_type.is_dir() {
             dirs.push(FsEntry {
                 token,
@@ -1700,7 +1726,7 @@ fn create_file(folder: String, rel_path: String, contents: String) -> Result<Str
     }
     std::fs::write(&target, contents)
         .map_err(|e| format!("failed to write {}: {e}", target.display()))?;
-    Ok(target.to_string_lossy().into_owned())
+    Ok(caller_token(&folder, std::path::Path::new(&rel_path)))
 }
 
 /// Create a (possibly nested) directory at `rel_path` under `folder` and return
@@ -1710,7 +1736,7 @@ fn create_folder(folder: String, rel_path: String) -> Result<String, String> {
     let target = resolve_in(&folder, &rel_path)?;
     std::fs::create_dir_all(&target)
         .map_err(|e| format!("failed to create {}: {e}", target.display()))?;
-    Ok(target.to_string_lossy().into_owned())
+    Ok(caller_token(&folder, std::path::Path::new(&rel_path)))
 }
 
 /// Rename the entry at `token` (a file or directory) in place to `new_name` and
@@ -1799,7 +1825,10 @@ fn move_entry(
         };
         removed.map_err(|e| format!("failed to remove source {token} after move: {e}"))?;
     }
-    Ok(dest.to_string_lossy().into_owned())
+    Ok(caller_token(
+        &dest_folder,
+        std::path::Path::new(&new_rel_path),
+    ))
 }
 
 /// Write raw bytes to `path`, replacing any existing file. Used to save a generated-project zip
@@ -3663,6 +3692,113 @@ mod tests {
         assert!(f.root().join("docs").join("moved.koi").is_file());
         assert_eq!(std::fs::read_to_string(&dest).unwrap(), "context A {}");
         assert!(!src.exists());
+    }
+
+    /// Every token in an `FsEntry` tree, depth-first.
+    fn all_tokens(entries: &[FsEntry], into: &mut Vec<String>) {
+        for entry in entries {
+            into.push(entry.token.clone());
+            if let Some(children) = &entry.children {
+                all_tokens(children, into);
+            }
+        }
+    }
+
+    #[test]
+    fn the_retrofitted_sinks_return_a_token_anchored_on_the_callers_own_folder() {
+        // `resolve_in` hands back the CANONICAL path, and returning that to the webview was a
+        // regression this containment work introduced. `FsEntry::token` is identity in the frontend,
+        // and the frontend decides a token's owning root with a string-PREFIX test (`rootOfToken` in
+        // `src/shell/workspaceController.ts`, `isUnderRoot` in `src/host/tauri.ts`). So a newly
+        // created file answered `/private/var/…` while every listing of the same workspace answered
+        // `/var/…` — the same file under two names, belonging to no root, breaking explorer
+        // placement, dirty-tab tracking and session restore. On Windows it would have been every call:
+        // `canonicalize` returns the `\\?\` verbatim form that no other token carries.
+        //
+        // The workspace is opened THROUGH A SYMLINK on unix so the canonical form is guaranteed to
+        // differ on every unix rather than only on macOS, where /var -> /private/var makes it so for
+        // free. On Windows the plain path suffices: the verbatim prefix is unconditional.
+        static COUNTER: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+        let base = std::env::temp_dir().join(format!(
+            "koine_token_{}_{}",
+            std::process::id(),
+            COUNTER.fetch_add(1, Ordering::SeqCst)
+        ));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(base.join("real")).unwrap();
+
+        #[cfg(unix)]
+        let opened = {
+            std::os::unix::fs::symlink(base.join("real"), base.join("link")).unwrap();
+            base.join("link")
+        };
+        #[cfg(not(unix))]
+        let opened = base.join("real");
+
+        let folder = opened.to_string_lossy().into_owned();
+
+        let created = create_file(
+            folder.clone(),
+            "docs/a.koi".to_string(),
+            "context A {}".to_string(),
+        )
+        .unwrap();
+        assert!(
+            created.starts_with(&folder),
+            "create_file answered {created}, which is not under the folder the caller passed ({folder}) \
+             — the frontend matches a token to its root by string prefix, so this file belongs to no \
+             workspace"
+        );
+
+        let made = create_folder(folder.clone(), "docs/nested".to_string()).unwrap();
+        assert!(
+            made.starts_with(&folder),
+            "create_folder answered {made}, not under {folder}"
+        );
+
+        // The round trip, which is the property that actually matters: the token a LISTING mints for
+        // a file must be the very token the command that created it handed back.
+        let mut tokens = Vec::new();
+        all_tokens(&list_entries(folder.clone()).unwrap(), &mut tokens);
+        assert!(
+            tokens.contains(&created),
+            "list_entries minted {tokens:?}, none of which is create_file's {created}"
+        );
+        assert!(
+            tokens.contains(&made),
+            "list_entries minted {tokens:?}, none of which is create_folder's {made}"
+        );
+
+        let moved = move_entry(
+            created.clone(),
+            folder.clone(),
+            "docs/b.koi".to_string(),
+            false,
+        )
+        .unwrap();
+        assert!(
+            moved.starts_with(&folder),
+            "move_entry answered {moved}, not under {folder}"
+        );
+
+        let listing = list_dir(folder.clone(), "docs".to_string()).unwrap();
+        assert!(
+            listing.iter().any(|e| e.token == moved),
+            "list_dir minted {:?}, none of which is move_entry's {moved}",
+            listing.iter().map(|e| e.token.as_str()).collect::<Vec<_>>()
+        );
+        // ...and the rel_path stays anchored on the workspace root, which is what the resolved-root
+        // strip above buys and what a naive "re-anchor everything" fix would have thrown away.
+        assert!(
+            listing.iter().any(|e| e.rel_path == "docs/b.koi"),
+            "list_dir reported {:?}, not the workspace-relative docs/b.koi",
+            listing
+                .iter()
+                .map(|e| e.rel_path.as_str())
+                .collect::<Vec<_>>()
+        );
+
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     #[test]

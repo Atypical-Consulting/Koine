@@ -69,14 +69,21 @@ We will:
    the normal case when writing output — is accepted while a symlink anywhere above it is still
    caught. This is the step Zed's first version lacked.
 3. Extract archives through **`SafeArchiveExtractor`**, which resolves **every member** through the
-   primitive before any join, **rejects link members wholesale**, caps member count and total
-   uncompressed size, and removes partial output on any rejection.
+   primitive before any join, **rejects link members wholesale in both containers** (a tar type flag,
+   and a zip's `S_IFLNK` external attributes), caps member count, per-member and total uncompressed
+   size *and the container's own size*, and removes partial output on **any** exit — including a fault
+   it does not recognise and therefore lets propagate.
 4. Hold both implementations to **one shared corpus**
    (`tests/fixtures/path-containment/cases.json`), read by `ContainedPathTests` and by
    `paths::tests::the_shared_corpus_agrees_with_this_implementation`.
 5. Make the obligation **mechanical**: `PathSinkGuardTests` and its Rust twin fail the build on a raw
-   join or an unrouted command handler, with a named allowlist whose every row carries a written
-   justification and whose stale rows fail too.
+   join, or on any `#[tauri::command]` **parameter** whose type could name a path and which the body
+   does not hand to the primitive — per parameter, not per command, so a handler that routes one of
+   its two path arguments cannot pass on the strength of the other. Every exception is a named
+   allowlist row with a written justification, and a stale row fails too. **This is an accounting
+   property, not a safety property:** some rows describe parameters that genuinely are not contained
+   (the absolute explorer tokens `move_entry`/`delete_entry`/`rename_entry` take, tracked by #1950),
+   and they say so. What the gate buys is that the next one cannot appear unnoticed.
 6. Run the platform-dependent half of this on **macOS and Windows**, not only Linux, by widening the
    existing `sandbox-confinement` CI job's filter — Windows path semantics (`\\?\`, drive-relative
    `C:evil`, alternate data streams, reserved device names, case-insensitive comparison) are where
@@ -100,6 +107,15 @@ and re-checked. A link that lands inside the root today can be made to point out
 member, and no extension format Koine intends to support needs to ship links — but this *is* a real
 restriction, taken deliberately and documented in the extraction contract rather than discovered by
 whoever packages one.
+
+**The canonical path is for the filesystem, not for the caller.** Point 1's "use the path it returns"
+is right about the *write* and wrong about the *answer*. The primitive resolves symlinks, so the path
+it hands back is spelled differently from the path the caller passed — macOS puts every temp-dir
+workspace behind `/var` → `/private/var`, and Windows' canonical form carries the `\\?\` verbatim
+prefix. A host command that returned that string as an entry's identity broke Studio's frontend, which
+matches a token to its opened root by string prefix: a file created in the workspace suddenly belonged
+to no workspace. So the rule has two halves — **resolve for the write, re-anchor for the answer** —
+and any new API that returns a path has to observe both.
 
 **The gate needs tending.** The allowlist is the whole design's soft spot: rows are matched on
 (enclosing function, text marker), so a rename asks for an edit, and a genuinely new trust class asks

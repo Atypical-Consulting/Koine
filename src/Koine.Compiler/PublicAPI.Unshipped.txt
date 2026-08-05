@@ -1672,6 +1672,7 @@ Koine.Compiler.Extensions.ExtractResult.Reason.init -> void
 Koine.Compiler.Extensions.ExtractResult.Succeeded.get -> bool
 Koine.Compiler.Extensions.ExtractResult.Succeeded.init -> void
 Koine.Compiler.Extensions.SafeArchiveExtractor
+const Koine.Compiler.Extensions.SafeArchiveExtractor.DefaultMaxArchiveBytes = 134217728 -> long
 const Koine.Compiler.Extensions.SafeArchiveExtractor.DefaultMaxMemberBytes = 16777216 -> long
 const Koine.Compiler.Extensions.SafeArchiveExtractor.DefaultMaxMemberCount = 4096 -> int
 const Koine.Compiler.Extensions.SafeArchiveExtractor.DefaultMaxTotalBytes = 67108864 -> long
@@ -1680,4 +1681,4 @@ override Koine.Compiler.Extensions.ExtractResult.GetHashCode() -> int
 override Koine.Compiler.Extensions.ExtractResult.ToString() -> string!
 static Koine.Compiler.Extensions.ExtractResult.operator !=(Koine.Compiler.Extensions.ExtractResult? left, Koine.Compiler.Extensions.ExtractResult? right) -> bool
 static Koine.Compiler.Extensions.ExtractResult.operator ==(Koine.Compiler.Extensions.ExtractResult? left, Koine.Compiler.Extensions.ExtractResult? right) -> bool
-static Koine.Compiler.Extensions.SafeArchiveExtractor.Extract(System.IO.Stream! archive, Koine.Compiler.Extensions.ArchiveKind kind, string! destinationRoot, int maxMemberCount = 4096, long maxTotalBytes = 67108864, long maxMemberBytes = 16777216) -> Koine.Compiler.Extensions.ExtractResult!
+static Koine.Compiler.Extensions.SafeArchiveExtractor.Extract(System.IO.Stream! archive, Koine.Compiler.Extensions.ArchiveKind kind, string! destinationRoot, int maxMemberCount = 4096, long maxTotalBytes = 67108864, long maxMemberBytes = 16777216, long maxArchiveBytes = 134217728) -> Koine.Compiler.Extensions.ExtractResult!

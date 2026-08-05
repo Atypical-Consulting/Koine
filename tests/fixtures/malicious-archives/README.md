@@ -58,6 +58,8 @@ byte-for-byte identical after: nothing written outside the root, nothing left in
       "why": "…",                            // prose; quoted in the failure message
       "setup": [ /* optional — see below */ ],
       "limits": { "maxMemberCount": 3 },     // optional; omitted fields keep the shipped default
+                                             // (maxMemberCount, maxTotalBytes, maxMemberBytes,
+                                             //  maxArchiveBytes)
       "members": [ /* see below */ ],
       "expect": "reject",                    // "reject" | "accept"
 
@@ -85,9 +87,11 @@ byte-for-byte identical after: nothing written outside the root, nothing left in
 |---|---|---|
 | `file` | `name`, and either `text` (UTF-8) or `zeros` (a count of zero bytes, for the bombs) | a regular file member |
 | `dir` | `name` | a directory member |
-| `symlink` | `name`, `linkTarget` | **tar only** — a `TarEntryType.SymbolicLink` member |
+| `symlink` | `name`, `linkTarget` | a `TarEntryType.SymbolicLink` member in a tar; in a **zip**, an entry whose external attributes carry `S_IFLNK \| 0777` in their high sixteen bits and whose body is the target — the convention `zip -y` writes and `unzip` reads, since zip has no member-type field |
 | `hardlink` | `name`, `linkTarget` | **tar only** — a `TarEntryType.HardLink` member |
 | `fifo` | `name` | **tar only** — a `TarEntryType.Fifo` member |
+| `meta` | `name`, `metaType` (`L`, `K`, `x` or `g`), `declaredSize` | **tar only** — a raw 512-byte metadata header block with that type flag and that size in its size field, and **no data behind it** |
+| `corrupt-header` | `name` | **tar only** — a raw 512-byte member header whose **checksum field is zeroed**, which is how the format spells end-of-archive |
 
 `name` is written into the container **verbatim**, backslashes and all. That is the whole point: these
 names are the attack.
@@ -95,6 +99,12 @@ names are the attack.
 `linkTarget` may contain `{sandbox}`, replaced with the sandbox's absolute path — which is how
 `tar-symlink-then-write-through` aims a link at a directory the test owns instead of at a real system
 path.
+
+The last two types are written by **hand**, straight into the stream between `TarWriter` entries,
+because no container writer will produce them — that is exactly why they were missing and why the
+`InvalidOperationException` a size-lying metadata header raises went unnoticed. They are skipped by
+`Case_archive_carries_its_declared_member_names_verbatim`: a hand-built block is not subject to "did
+the writer rewrite my name", and reading one back is the very failure the case exists to pin.
 
 ### `setup` — the filesystem as it stands before the call
 
@@ -163,6 +173,9 @@ rather than pass vacuously.
 | `zip-bomb-total` | three members, each legal, summing past the total cap |
 | `zip-partial-then-escape` | three good members, then an escape — the rollback proof |
 | `zip-member-under-a-pre-existing-symlink` | a blameless name landing under a link already on disk |
+| `zip-symlink-member` | a **zip** member declaring `S_IFLNK` in its external attributes |
+| `zip-symlink-then-write-through` | CVE-2026-27976's shape in the zip container |
+| `zip-container-size-cap` | a container larger than the cap, refused before it is opened |
 | `zip-benign` | must extract whole |
 | `tar-slip-basic` | Zip Slip through the other reader |
 | `tar-absolute-member` | `/etc/passwd` in a tar |
@@ -170,7 +183,32 @@ rather than pass vacuously.
 | `tar-symlink-then-write-through` | **CVE-2026-27976 itself**: plant a link, then write through it |
 | `tar-hardlink-escape` | a hard link aliasing a path outside |
 | `tar-fifo-member` | a member that is not a file, directory or link |
+| `tar-gnu-longname-header-size-lie` | a `'L'` header declaring more data than follows it |
+| `tar-gnu-longlink-header-size-lie` | the same lie in the `'K'` header |
+| `tar-pax-extended-header-size-lie` | the same lie in the pax per-entry `'x'` header |
+| `tar-pax-global-header-size-lie` | the same lie in the pax global `'g'` header |
+| `tar-truncated-at-a-corrupt-header-cannot-be-detected` | an **accept** row documenting a limit: a truncation the reader cannot see |
 | `tar-benign` | must extract whole, including the leading `./` member |
+
+### Why the four metadata rows exist
+
+`TarReader` reads a metadata header ( `'L'`/`'K'` GNU long names, `'x'`/`'g'` pax attributes) eagerly,
+and raises **`InvalidOperationException`** — not `InvalidDataException` — when its declared size
+overruns the data behind it. That type was not on the extractor's recognised-fault list, so the
+exception escaped `Extract` altogether *and* skipped the rollback (which sat on the non-throwing
+path): a crafted tar both crashed the caller and left its already-written members on disk. The corpus
+had **zero** tar metadata-header rows, which is exactly why it was missed. Each row keeps an innocent
+first member ahead of the bad header, so a green run proves the unwind rather than only the exception
+type.
+
+### And why one row expects `accept`
+
+`tar-truncated-at-a-corrupt-header-cannot-be-detected` is not a capability, it is a **limit written
+down**. A tar's end is a zeroed header, so a header corrupted into one is indistinguishable from the
+archive simply ending — the reader stops, reports no error, and the members after it are silently
+never seen. `ExtractResult.Succeeded` therefore means *nothing was refused*, never *everything the
+author packed came out*. Detecting a short delivery needs a signed out-of-band manifest, which is the
+installer's job (#1941). The row exists so that if the semantics ever change, they change visibly.
 
 ## Adding a case
 

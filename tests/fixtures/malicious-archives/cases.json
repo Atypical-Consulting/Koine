@@ -185,6 +185,46 @@
       "platforms": ["unix"]
     },
     {
+      "name": "zip-symlink-member",
+      "kind": "zip",
+      "why": "A zip has no member-type field, so a Unix-authored archive declares a symlink in the HIGH sixteen bits of the external attributes (S_IFLNK | 0777) and writes the target as the member's body. Nothing escapes today — this extractor cannot create a link, so it would write an ordinary file whose CONTENT is an outside path — but the class documents 'link members are refused wholesale' with no format caveat, and a downstream re-packer handed that file resurrects the link.",
+      "members": [
+        { "type": "symlink", "name": "link", "linkTarget": "{sandbox}/outside" }
+      ],
+      "expect": "reject",
+      "reason": "link-member",
+      "offendingMember": "link",
+      "mustNotExist": ["link"],
+      "platforms": ["unix", "windows"]
+    },
+    {
+      "name": "zip-symlink-then-write-through",
+      "kind": "zip",
+      "why": "CVE-2026-27976's shape in the OTHER container. Member 1 declares an in-root symlink pointing outside; member 2 has a blameless name and would be written through it by an extractor that honoured the link. Refusing link members kills it at member 1 — and before that refusal existed member 1 was written as a plain file, which made member 2 fail with a DESTINATION-unusable error, a reason that told the caller nothing about what the archive was doing.",
+      "members": [
+        { "type": "symlink", "name": "link", "linkTarget": "{sandbox}/outside" },
+        { "type": "file", "name": "link/pwned.txt", "text": "pwned" }
+      ],
+      "expect": "reject",
+      "reason": "link-member",
+      "offendingMember": "link",
+      "mustNotExist": ["link", "{sandbox}/outside/pwned.txt"],
+      "platforms": ["unix", "windows"]
+    },
+    {
+      "name": "zip-container-size-cap",
+      "kind": "zip",
+      "why": "The container cap, charged before ZipArchive reads a byte. It is the only cap that can be enforced ahead of the central directory — which ZipArchive materializes in full before handing back the first member, so the per-member caps cannot bound what a 200k-entry directory costs to parse.",
+      "limits": { "maxArchiveBytes": 64 },
+      "members": [
+        { "type": "file", "name": "a.txt", "text": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }
+      ],
+      "expect": "reject",
+      "reason": "archive-too-large",
+      "mustNotExist": ["a.txt"],
+      "platforms": ["unix", "windows"]
+    },
+    {
       "name": "zip-benign",
       "kind": "zip",
       "why": "The gate that only ever rejects proves nothing. A plain archive must come out whole, with an implicit parent directory created for a nested member and an explicit directory member honoured.",
@@ -284,6 +324,77 @@
       "reason": "unsupported-member-type",
       "offendingMember": "pipe",
       "mustNotExist": ["pipe"],
+      "platforms": ["unix", "windows"]
+    },
+    {
+      "name": "tar-gnu-longname-header-size-lie",
+      "kind": "tar",
+      "why": "A GNU '@LongLink' ('L') metadata header declaring a size larger than the data behind it. TarReader reads a metadata header EAGERLY and raises InvalidOperationException — not InvalidDataException — which was not on the recognised-fault list, so the exception escaped Extract entirely AND the rollback (which sat on the non-throwing path) never ran: the innocent first member stayed on disk. The first member is here to prove the unwind, not for decoration.",
+      "members": [
+        { "type": "file", "name": "installed.txt", "text": "PAYLOAD" },
+        { "type": "meta", "name": "././@LongLink", "metaType": "L", "declaredSize": 2147483647 }
+      ],
+      "expect": "reject",
+      "reason": "malformed-archive",
+      "mustNotExist": ["installed.txt"],
+      "platforms": ["unix", "windows"]
+    },
+    {
+      "name": "tar-gnu-longlink-header-size-lie",
+      "kind": "tar",
+      "why": "The same lie in GNU's OTHER metadata header ('K', a long LINK name). Four header types carry a size the reader believes; a fix that only covered the one that was reported would leave three.",
+      "members": [
+        { "type": "file", "name": "installed.txt", "text": "PAYLOAD" },
+        { "type": "meta", "name": "././@LongLink", "metaType": "K", "declaredSize": 2147483647 }
+      ],
+      "expect": "reject",
+      "reason": "malformed-archive",
+      "mustNotExist": ["installed.txt"],
+      "platforms": ["unix", "windows"]
+    },
+    {
+      "name": "tar-pax-extended-header-size-lie",
+      "kind": "tar",
+      "why": "The pax per-entry extended-attributes header ('x') telling the same lie. .NET's own TarWriter emits one of these ahead of every pax entry, so this is the shape most likely to arrive in a real archive.",
+      "members": [
+        { "type": "file", "name": "installed.txt", "text": "PAYLOAD" },
+        { "type": "meta", "name": "PaxHeaders/installed.txt", "metaType": "x", "declaredSize": 2147483647 }
+      ],
+      "expect": "reject",
+      "reason": "malformed-archive",
+      "mustNotExist": ["installed.txt"],
+      "platforms": ["unix", "windows"]
+    },
+    {
+      "name": "tar-pax-global-header-size-lie",
+      "kind": "tar",
+      "why": "The pax GLOBAL header ('g'). It is the one member type the extractor deliberately waves through without validating its name, which makes 'the reader trusts its declared size' worth pinning here rather than assuming it is covered by the per-entry case.",
+      "members": [
+        { "type": "file", "name": "installed.txt", "text": "PAYLOAD" },
+        { "type": "meta", "name": "GlobalHead.0.0", "metaType": "g", "declaredSize": 2147483647 }
+      ],
+      "expect": "reject",
+      "reason": "malformed-archive",
+      "mustNotExist": ["installed.txt"],
+      "platforms": ["unix", "windows"]
+    },
+    {
+      "name": "tar-truncated-at-a-corrupt-header-cannot-be-detected",
+      "kind": "tar",
+      "why": "An ACCEPT case that documents a limit rather than a capability, which is why it is worth a row. A tar's end is spelled by a zeroed header, so a header whose checksum field is zeroed is indistinguishable from the end of the archive — TarReader stops there and reports no error, and nothing downstream of it can tell 'the archive ended' from 'the archive was cut'. So `c.txt` is silently never extracted and the call reports success with one member written. `Succeeded` therefore means NOTHING WAS REFUSED, not EVERYTHING PRESENT WAS EXTRACTED; detecting a truncation needs an out-of-band manifest, which is the installer's obligation (#1941), not the extractor's. Pinned so the day the semantics change, it changes visibly.",
+      "members": [
+        { "type": "file", "name": "a.txt", "text": "a" },
+        { "type": "corrupt-header", "name": "b.txt" },
+        { "type": "file", "name": "c.txt", "text": "c" }
+      ],
+      "expect": "accept",
+      "filesWritten": 1,
+      "directoriesCreated": 0,
+      "bytesWritten": 1,
+      "expectedFiles": [
+        { "path": "a.txt", "text": "a" }
+      ],
+      "expectedDirs": [],
       "platforms": ["unix", "windows"]
     },
     {

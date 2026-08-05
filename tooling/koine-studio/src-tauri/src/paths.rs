@@ -1227,7 +1227,16 @@ mod tests {
     //   2. `disallowed-methods` IS TOO BLUNT ANYWAY. It keys on a method path, so banning
     //      `std::path::Path::join` would fire on all ~90 joins in `lib.rs` — fixture setup in its
     //      test module, the internal `copy_recursive` recursion, the `current_exe()`-derived sidecar
-    //      lookup — with no way to excuse a single one.
+    //      lookup — with no way to excuse a single one. And no lint at all can express rule 2, which
+    //      is about a parameter reaching a call rather than about a method being called.
+    //
+    // WHAT IT PROVES, EXACTLY. Every `#[tauri::command]` parameter whose type could name a path is
+    // either handed to the containment primitive or carries an allowlist row. That is an
+    // ACCOUNTING property, not a safety property: several rows below describe parameters that are
+    // genuinely not contained (the explorer tokens, tracked by #1950). The guard's job is that
+    // nobody adds a new one WITHOUT NOTICING — the first version of it keyed the obligation on the
+    // parameter's NAME, which is how `move_entry` came to count as satisfied while its `token`
+    // reached `fs::rename` unexamined, and how `delete_entry` was never reported at all.
     //
     // A `#[cfg(test)]` scan over `include_str!("lib.rs")` has neither problem: it runs under
     // `cargo test --locked` on all three OSes of the studio-build matrix, and it carries a named
@@ -1249,19 +1258,40 @@ mod tests {
 
     /// `.join(` outside the containment primitive, in the non-test half of `lib.rs`.
     const RAW_JOIN: &str = "raw-join";
-    /// A `#[tauri::command]` taking a caller-supplied relative path that never calls `resolve_in`.
+    /// One `#[tauri::command]` parameter that could name a path and is not routed through the
+    /// primitive. Reported PER PARAMETER, not per command — a command that routes one of its two
+    /// path parameters and leaves the other raw is exactly the bug this exists to find.
     const UNROUTED_COMMAND: &str = "unrouted-command";
 
-    /// A parameter carries a caller-supplied relative path when one of its underscore-separated name
-    /// segments is one of these. Segment-wise rather than substring, so `relay` is not swept in by
-    /// the `rel` in its first three letters.
-    const PATH_PARAM_SEGMENTS: [&str; 4] = ["rel", "rels", "path", "paths"];
+    /// The type fragments that make a parameter capable of naming a path.
+    ///
+    /// **The rule is inverted on purpose.** It used to key on the parameter's NAME — a `rel`/`path`
+    /// segment — and that is how the first version of this guard came to overclaim: `move_entry`
+    /// counted as satisfied because it routed `new_rel_path`, while its OTHER path parameter,
+    /// `token`, went to `fs::rename`/`copy_recursive` completely unexamined, and `delete_entry`,
+    /// `rename_entry`, `list_entries` and `list_koi_files` were never reported at all because
+    /// `token` and `dir` matched no segment. A name-based rule can only ever catch the names someone
+    /// thought of. A TYPE-based rule cannot silently miss the next one: every string a command
+    /// accepts must be either routed or written down.
+    ///
+    /// Tauri's own injected parameters (`AppHandle`, `State<'_, T>`, `Window`) mention none of these,
+    /// so they fall out without needing a special case.
+    const PATH_CAPABLE_TYPES: [&str; 3] = ["String", "str", "Path"];
 
     /// `(function, kind, marker, why it is safe)` — the twin of `PathSinkGuardTests.RustAllowlist`.
     /// The marker must appear in the reported line, so an entry pins WHICH site it excuses while
-    /// still surviving a reformat.
+    /// still surviving a reformat. For an `unrouted-command` row that means the parameter
+    /// declaration **in backticks**, exactly as the report spells it — without them
+    /// `tracked_paths: Vec<String>` silently excuses the `untracked_paths` site it is a substring of,
+    /// which is precisely how `git_discard`'s second pathspec parameter went unlisted.
+    ///
+    /// **These rows are the audit, not a summary of one.** Every string a `#[tauri::command]`
+    /// accepts is here unless the body hands it to the primitive. That makes the table long and
+    /// repetitive on purpose: the previous, name-shaped rule produced a short table by simply not
+    /// looking at `token`, `dir`, `contents` or `cwd`, and a short table that has not looked is worse
+    /// than a long one that has.
     const SINK_ALLOWLIST: &[(&str, &str, &str, &str)] = &[
-        // Joins that compose no caller-supplied string.
+        // --- raw-join: joins that compose no caller-supplied string -------------------------------
         (
             "bundled_koine_path",
             RAW_JOIN,
@@ -1286,55 +1316,153 @@ mod tests {
             "dst.join(entry.file_name())",
             "internal recursion: a file_name() off the SOURCE tree onto a destination move_entry already resolved",
         ),
-        // Commands whose path parameter is a different trust class.
+        (
+            "caller_token",
+            RAW_JOIN,
+            ".join(rel)",
+            "builds the token SHOWN to the webview, never a path written to; reached only after resolve_in already proved containment, and the write used the resolved path",
+        ),
+        // --- unrouted-command: the opened folder itself ---------------------------------------------
+        //
+        // `dir` / `parent_dir` is the workspace or repository the user opened in the OS dialog. It is
+        // the ROOT, not a path under one, so there is nothing to contain it against — resolve_in would
+        // reject every legitimate call. The issue's Non-goals draw exactly this line: "User-chosen
+        // paths from the file dialog are a different trust class."
+        ("list_koi_files", UNROUTED_COMMAND, "`dir: String`", "the opened workspace folder — the root itself"),
+        ("list_entries", UNROUTED_COMMAND, "`dir: String`", "the opened workspace folder — the root itself"),
+        ("git_log_for_range", UNROUTED_COMMAND, "`dir: String`", "the opened repository — passed to `git -C`"),
+        ("git_status", UNROUTED_COMMAND, "`dir: String`", "the opened repository — passed to `git -C`"),
+        ("git_diff", UNROUTED_COMMAND, "`dir: String`", "the opened repository — passed to `git -C`"),
+        ("git_numstat", UNROUTED_COMMAND, "`dir: String`", "the opened repository — passed to `git -C`"),
+        ("git_stage", UNROUTED_COMMAND, "`dir: String`", "the opened repository — passed to `git -C`"),
+        ("git_unstage", UNROUTED_COMMAND, "`dir: String`", "the opened repository — passed to `git -C`"),
+        ("git_discard", UNROUTED_COMMAND, "`dir: String`", "the opened repository — passed to `git -C`"),
+        ("git_commit", UNROUTED_COMMAND, "`dir: String`", "the opened repository — passed to `git -C`"),
+        ("git_push", UNROUTED_COMMAND, "`dir: String`", "the opened repository — passed to `git -C`"),
+        ("git_fetch", UNROUTED_COMMAND, "`dir: String`", "the opened repository — passed to `git -C`"),
+        ("git_pull", UNROUTED_COMMAND, "`dir: String`", "the opened repository — passed to `git -C`"),
+        ("git_revert", UNROUTED_COMMAND, "`dir: String`", "the opened repository — passed to `git -C`"),
+        ("git_init", UNROUTED_COMMAND, "`dir: String`", "the folder to `git init` — passed to `git -C`"),
+        ("git_branches", UNROUTED_COMMAND, "`dir: String`", "the opened repository — passed to `git -C`"),
+        ("git_checkout", UNROUTED_COMMAND, "`dir: String`", "the opened repository — passed to `git -C`"),
+        ("git_log", UNROUTED_COMMAND, "`dir: String`", "the opened repository — passed to `git -C`"),
+        (
+            "git_clone",
+            UNROUTED_COMMAND,
+            "`parent_dir: String`",
+            "the folder the user picked to clone INTO — the root itself; the clone is confined to it by clone_dest_name, which reduces the destination to one segment",
+        ),
+        // --- unrouted-command: user-chosen absolute paths from the OS dialog ------------------------
         (
             "read_text_file",
             UNROUTED_COMMAND,
-            "path: String",
-            "an absolute path the user picked in the OS file dialog — there is no root to contain it against",
+            "`path: String`",
+            "an absolute path the user picked in the OS file dialog (or an explorer token minted from it). NOT contained — the user's own choice IS the root; the explorer-token half of this trust class is tracked by #1950",
         ),
         (
             "write_text_file",
             UNROUTED_COMMAND,
-            "path: String",
-            "the save side of the same user-chosen dialog path",
+            "`path: String`",
+            "the save side of the same user-chosen dialog path — likewise NOT contained (#1950)",
         ),
         (
             "write_bytes",
             UNROUTED_COMMAND,
-            "path: String",
-            "the absolute save-zip target the user chose in the OS dialog",
+            "`path: String`",
+            "the absolute save-zip target the user chose in the OS dialog; write_text_file cannot carry binary. NOT contained (#1950)",
+        ),
+        // --- unrouted-command: explorer tokens that are GENUINELY UNVALIDATED (#1950) ---------------
+        //
+        // Say it plainly rather than dressing it up. `token` is an absolute path the host minted for
+        // an explorer row and handed to the webview; nothing re-checks it on the way back in, so a
+        // caller that can fabricate one reaches any file the user can. Containing it is a behaviour
+        // change to user-facing commands in the file-dialog trust class, which #1942 put out of scope
+        // on purpose — #1950 tracks it. A row that claimed these were safe would be worse than no row.
+        (
+            "rename_entry",
+            UNROUTED_COMMAND,
+            "`token: String`",
+            "an absolute explorer-minted token, NOT contained today (#1950). The rename itself cannot travel — is_safe_name plus a join onto the token's OWN parent keeps it in place — but the token names the file, so an arbitrary one renames an arbitrary file",
         ),
         (
-            "git_diff",
+            "delete_entry",
             UNROUTED_COMMAND,
-            "rel_path: String",
-            "a pathspec handed to the git binary via `git -C <dir> … --`, never joined by the host",
+            "`token: String`",
+            "an absolute explorer-minted token going straight to remove_dir_all/remove_file, NOT contained today (#1950)",
         ),
         (
-            "git_stage",
+            "move_entry",
             UNROUTED_COMMAND,
-            "rel_paths: Vec<String>",
-            "pathspecs handed to the git binary, never joined by the host",
+            "`token: String`",
+            "the move SOURCE: an absolute explorer-minted token reaching fs::rename and copy_recursive, NOT contained today (#1950). Only the DESTINATION half (dest_folder + new_rel_path) goes through resolve_in — which is exactly the asymmetry a per-command guard reported as satisfied and a per-parameter one does not",
         ),
-        (
-            "git_unstage",
-            UNROUTED_COMMAND,
-            "rel_paths: Vec<String>",
-            "pathspecs handed to the git binary, never joined by the host",
-        ),
+        // --- unrouted-command: pathspecs the git BINARY resolves ------------------------------------
+        //
+        // Every git_* command runs `git -C <dir> <args…>`, and each mutating call is scoped by an
+        // explicit `--`. These strings are pathspecs git resolves itself, relative to the repository
+        // it was pointed at. The host never joins them onto anything, so there is no join to guard.
+        ("git_diff", UNROUTED_COMMAND, "`rel_path: String`", "a pathspec for `git -C <dir> diff -- <pathspec>`"),
+        ("git_stage", UNROUTED_COMMAND, "`rel_paths: Vec<String>`", "pathspecs for `git -C <dir> add -- …`"),
+        ("git_unstage", UNROUTED_COMMAND, "`rel_paths: Vec<String>`", "pathspecs for `git -C <dir> restore --staged -- …`"),
+        ("git_discard", UNROUTED_COMMAND, "`tracked_paths: Vec<String>`", "pathspecs for `git -C <dir> restore -- …`"),
         (
             "git_discard",
             UNROUTED_COMMAND,
-            "tracked_paths: Vec<String>",
-            "pathspecs handed to the git binary; the untracked half goes through the same plumbing",
+            "`untracked_paths: Vec<String>`",
+            "pathspecs for `git -C <dir> clean -- …`, deleted through the same git plumbing as the tracked half. Unlisted until this guard started reporting per PARAMETER: its marker is a substring of tracked_paths'",
+        ),
+        ("git_log", UNROUTED_COMMAND, "`rel_path: Option<String>`", "an optional pathspec narrowing `git -C <dir> log -- …`"),
+        (
+            "git_log_for_range",
+            UNROUTED_COMMAND,
+            "`args: Vec<String>`",
+            "already-built `git log` arguments (a revision range and formatting flags), handed to the binary and never joined",
         ),
         (
-            "git_log",
+            "git_clone",
             UNROUTED_COMMAND,
-            "rel_path: Option<String>",
-            "an optional pathspec narrowing `git -C <dir> log --`, never joined by the host",
+            "`url: String`",
+            "the clone SOURCE, handed to `git clone -- <url> <dest>`; git resolves it (a URL, or a local path) itself. `--` terminates option parsing so a leading `-` cannot become a flag",
         ),
+        (
+            "git_clone",
+            UNROUTED_COMMAND,
+            "`dir_name: Option<String>`",
+            "the destination folder name, reduced by clone_dest_name to a single non-empty segment free of `/`, `\\` and `..` before it is used",
+        ),
+        // --- unrouted-command: strings that are not paths at all -------------------------------------
+        //
+        // Listed rather than filtered out by a name rule, because "this one is obviously content" is
+        // the judgement the previous rule made silently for `token` and `dir` too.
+        ("write_text_file", UNROUTED_COMMAND, "`contents: String`", "the bytes to write — content, not a path"),
+        ("create_file", UNROUTED_COMMAND, "`contents: String`", "the bytes to write — content, not a path"),
+        (
+            "rename_entry",
+            UNROUTED_COMMAND,
+            "`new_name: String`",
+            "a single entry name, screened by is_safe_name (non-empty, separator-free, never `.`/`..`) and joined onto the token's own parent, so it cannot move the entry",
+        ),
+        ("git_commit", UNROUTED_COMMAND, "`message: String`", "the commit message, passed as a `-m` argument"),
+        ("git_revert", UNROUTED_COMMAND, "`sha: String`", "a commit-ish resolved by git, never a path"),
+        ("git_checkout", UNROUTED_COMMAND, "`branch: String`", "a branch name resolved by git, never a path"),
+        ("lsp_send", UNROUTED_COMMAND, "`message: String`", "one LSP JSON-RPC frame written to the language server's stdin"),
+        ("pty_write", UNROUTED_COMMAND, "`data: String`", "keystrokes written to the terminal's pty — bytes, not a path"),
+        (
+            "pty_start",
+            UNROUTED_COMMAND,
+            "`cwd: Option<String>`",
+            "the interactive shell's starting directory. Deliberately NOT contained: a terminal is an unrestricted user shell by design, and a `cd` in its first second reaches anywhere containment here could have stopped",
+        ),
+        (
+            "pty_start",
+            UNROUTED_COMMAND,
+            "`shell_args: Option<Vec<String>>`",
+            "argv for that same user shell — same reasoning, and no path is composed from it",
+        ),
+        ("collab_start", UNROUTED_COMMAND, "`mode: String`", "`host` or `join`, a session role"),
+        ("collab_start", UNROUTED_COMMAND, "`token: Option<String>`", "the collaboration INVITE token (a Noise pre-shared secret), not an explorer token and not a path"),
+        ("collab_start", UNROUTED_COMMAND, "`bind_address: Option<String>`", "a host:port to listen on — a socket address, not a path"),
+        ("collab_start", UNROUTED_COMMAND, "`relay: Option<String>`", "the collaboration broker's URL — a socket address, not a path"),
     ];
 
     /// One reported site: `(line, kind, function, text)`.
@@ -1462,20 +1590,78 @@ mod tests {
         out
     }
 
-    /// True for a parameter carrying a relative path chosen by whoever called the command: a
-    /// `rel`/`path`-segmented name over a string-or-path type. Both halves matter — the name alone
-    /// would sweep in Tauri's own state handles, the type alone every `String` in the file.
-    fn is_caller_supplied_relpath(param: &str) -> bool {
-        let Some((name, ty)) = param.split_once(':') else {
+    /// The parameter's own name, stripped of `mut`.
+    fn param_name(param: &str) -> Option<String> {
+        let (name, _) = param.split_once(':')?;
+        Some(name.replace("mut ", "").trim().to_string())
+    }
+
+    /// True for a parameter whose type could carry a path — see [`PATH_CAPABLE_TYPES`].
+    fn is_path_capable(param: &str) -> bool {
+        let Some((_, ty)) = param.split_once(':') else {
             return false;
         };
-        let named = name
-            .replace("mut ", "")
-            .trim()
-            .split('_')
-            .any(|segment| PATH_PARAM_SEGMENTS.contains(&segment));
-        let typed = ty.contains("String") || ty.contains("str") || ty.contains("Path");
-        named && typed
+        PATH_CAPABLE_TYPES.iter().any(|t| ty.contains(t))
+    }
+
+    /// The parameter names this body hands to the containment primitive.
+    ///
+    /// Per argument rather than per call: the LAST identifier of each top-level argument is the value
+    /// being passed (`&dir` -> `dir`, `std::path::Path::new(&rel_path)` -> `rel_path`). Taking every
+    /// identifier instead would let a type or module name (`Path`, `new`) satisfy a parameter that
+    /// merely shares its spelling.
+    fn routed_params(body: &str) -> Vec<String> {
+        let mut routed = Vec::new();
+
+        for marker in ["resolve_in(", "contained_path("] {
+            let mut from = 0usize;
+            while let Some(pos) = body[from..].find(marker) {
+                let open = from + pos + marker.len();
+                let mut depth = 1i32;
+                let mut end = open;
+                for (i, c) in body[open..].char_indices() {
+                    match c {
+                        '(' | '[' | '<' => depth += 1,
+                        ')' | ']' | '>' => {
+                            depth -= 1;
+                            if depth == 0 {
+                                end = open + i;
+                                break;
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                if end <= open {
+                    break;
+                }
+
+                for argument in split_params(&body[open..end]) {
+                    let mut last = String::new();
+                    let mut current = String::new();
+                    for c in argument.chars() {
+                        if is_ident_byte(c as u8) && c.is_ascii() {
+                            current.push(c);
+                        } else {
+                            if !current.is_empty() {
+                                last = std::mem::take(&mut current);
+                            }
+                            current.clear();
+                        }
+                    }
+                    if !current.is_empty() {
+                        last = current;
+                    }
+                    if !last.is_empty() {
+                        routed.push(last);
+                    }
+                }
+
+                from = end;
+            }
+        }
+
+        routed
     }
 
     /// Every site in the non-test half of `lib.rs` that composes a filesystem path from a value the
@@ -1500,28 +1686,28 @@ mod tests {
                 ));
             }
             if lines[i].trim_start().starts_with("#[tauri::command") {
-                if let Some(site) = inspect_command(&lines, i, limit) {
-                    sites.push(site);
-                }
+                sites.extend(inspect_command(&lines, i, limit));
             }
         }
 
         sites
     }
 
-    /// Report the `#[tauri::command]` starting at `attribute` when it declares a caller-supplied
-    /// relative-path parameter and never calls `resolve_in`.
-    fn inspect_command(lines: &[&str], attribute: usize, limit: usize) -> Option<Site> {
+    /// Report every path-capable parameter of the `#[tauri::command]` starting at `attribute` that
+    /// the body does not hand to the containment primitive. One site per parameter.
+    fn inspect_command(lines: &[&str], attribute: usize, limit: usize) -> Vec<Site> {
         let mut i = attribute + 1;
         while i < limit && declared_fn_name(&strip_strings_and_comments(lines[i])).is_none() {
             i += 1;
         }
         if i >= limit {
-            return None;
+            return Vec::new();
         }
 
         let declaration = i;
-        let name = declared_fn_name(&strip_strings_and_comments(lines[i]))?;
+        let Some(name) = declared_fn_name(&strip_strings_and_comments(lines[i])) else {
+            return Vec::new();
+        };
 
         // The signature: from the first `(` until the parameter list's parens balance.
         let mut params = String::new();
@@ -1556,12 +1742,12 @@ mod tests {
             i += 1;
         }
 
-        let tainted: Vec<String> = split_params(&params)
+        let capable: Vec<String> = split_params(&params)
             .into_iter()
-            .filter(|p| is_caller_supplied_relpath(p))
+            .filter(|p| is_path_capable(p))
             .collect();
-        if tainted.is_empty() {
-            return None;
+        if capable.is_empty() {
+            return Vec::new();
         }
 
         // The body: from the opening brace until the braces balance again.
@@ -1588,16 +1774,23 @@ mod tests {
             i += 1;
         }
 
-        if body.contains("resolve_in(") {
-            return None;
-        }
+        let routed = routed_params(&body);
 
-        Some((
-            declaration + 1,
-            UNROUTED_COMMAND,
-            name.clone(),
-            format!("fn {name}({}) never calls resolve_in", tainted.join(", ")),
-        ))
+        capable
+            .into_iter()
+            .filter(|p| !param_name(p).is_some_and(|n| routed.contains(&n)))
+            .map(|p| {
+                (
+                    declaration + 1,
+                    UNROUTED_COMMAND,
+                    name.clone(),
+                    // The parameter is quoted, and an allowlist marker quotes it the same way, so
+                    // `tracked_paths: Vec<String>` cannot silently excuse the `untracked_paths` site
+                    // it is a substring of.
+                    format!("fn {name}: parameter `{p}` is never routed through the primitive"),
+                )
+            })
+            .collect()
     }
 
     fn allowlisted(site: &Site) -> bool {
@@ -1607,20 +1800,25 @@ mod tests {
     }
 
     #[test]
-    fn the_host_routes_every_plugin_influenced_path_through_the_primitive() {
+    fn every_path_capable_command_parameter_is_routed_or_allowlisted() {
         let sites = find_sink_sites();
         let unlisted: Vec<&Site> = sites.iter().filter(|s| !allowlisted(s)).collect();
 
         assert!(
             unlisted.is_empty(),
-            "unguarded filesystem path site(s) in lib.rs. A [{RAW_JOIN}] composes a path with \
-             `Path::join` outside the containment primitive; an [{UNROUTED_COMMAND}] takes a \
-             caller-supplied relative-path parameter and never calls `resolve_in`. Either is how \
-             CVE-2026-27800 and CVE-2026-27976 happened. Route it through `resolve_in(folder, \
-             rel_path)` and USE THE PATH IT RETURNS — re-deriving `folder.join(rel_path)` afterwards \
-             throws away the symlink resolution that makes it safe. If the site is genuinely a \
-             different trust class, add a row to SINK_ALLOWLIST here AND to \
-             PathSinkGuardTests.RustAllowlist in the .NET suite, with a real justification:\n{}",
+            "unaccounted filesystem path site(s) in lib.rs. A [{RAW_JOIN}] composes a path with \
+             `Path::join` outside the containment primitive; an [{UNROUTED_COMMAND}] is one \
+             `#[tauri::command]` PARAMETER whose type could name a path and which the body never \
+             hands to `resolve_in`/`contained_path`. Either is how CVE-2026-27800 and CVE-2026-27976 \
+             happened.\n\n\
+             This guard proves that every such parameter is ACCOUNTED FOR — routed, or written down \
+             with a reason. It does not prove they are all contained, and some allowlisted ones are \
+             explicitly not (see the #1950 rows). So: route it through `resolve_in(folder, rel_path)` \
+             and USE THE PATH IT RETURNS — re-deriving `folder.join(rel_path)` afterwards throws away \
+             the symlink resolution that makes it safe — or add a row to SINK_ALLOWLIST here AND to \
+             PathSinkGuardTests.RustAllowlist in the .NET suite. The row must state what the value \
+             ACTUALLY is; if it is a path nothing validates, say so and cite the issue tracking it. A \
+             row claiming safety that does not hold is worse than no row:\n{}",
             unlisted
                 .iter()
                 .map(|(line, kind, function, text)| format!(

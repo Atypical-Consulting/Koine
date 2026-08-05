@@ -116,7 +116,12 @@ public enum ArchiveRejectionReason
     /// <summary>A single member decompressed past the per-member cap — a zip bomb.</summary>
     MemberTooLarge = 11,
 
-    /// <summary>The members together decompressed past the whole-archive cap — a zip bomb.</summary>
+    /// <summary>
+    /// The members together decompressed past the whole-archive cap, or the container itself was
+    /// larger than the container cap — both a zip bomb's shape, one measured on the way out of the
+    /// decompressor and one charged before the archive is opened at all. The container form reports no
+    /// offending member, because no single member is to blame for the container's size.
+    /// </summary>
     ArchiveTooLarge = 12,
 
     /// <summary>
@@ -131,8 +136,21 @@ public enum ArchiveRejectionReason
 /// nothing was.
 /// </summary>
 /// <param name="Succeeded">
-/// <see langword="true"/> if every member was extracted. <see langword="false"/> means the extraction
-/// was unwound — no file it created survives, and a destination root it created is gone too.
+/// <see langword="true"/> if <b>nothing was refused</b>: every member the reader handed over was
+/// extracted, and no rule said no. <see langword="false"/> means the extraction was unwound — no file
+/// it created survives, and a destination root it created is gone too.
+/// <para>
+/// <b>It does not mean every member the archive's author packed came out</b>, and it cannot. A tar's
+/// end is spelled by a zeroed header, so an archive cut at (or corrupted into) one is
+/// indistinguishable from an archive that simply ended: <see cref="TarReader"/> stops and reports no
+/// error, and this type has no more information than the reader does. A zip's central directory
+/// makes truncation easier to notice but not reliably so. Detecting a short delivery needs a
+/// signed, out-of-band manifest — a count and a digest per member, obtained through a channel the
+/// archive itself does not control. <b>The extension installer (#1941) must verify against one</b>;
+/// this result is not a substitute, and treating it as one turns "half the archive arrived" into a
+/// successful install. Pinned by the corpus row
+/// <c>tar-truncated-at-a-corrupt-header-cannot-be-detected</c>.
+/// </para>
 /// </param>
 /// <param name="Reason">
 /// <see cref="ArchiveRejectionReason.None"/> on success, otherwise why the archive was refused.
@@ -185,7 +203,9 @@ public sealed record ExtractResult(
 /// </description></item>
 /// <item><description>
 /// <b>Caps on member count, per-member size and total size</b>, all enforced against bytes counted as
-/// they stream. Nothing is decompressed into memory, and no declared length is believed.
+/// they stream. Nothing is decompressed into memory, and no declared length is believed. Plus a cap
+/// on the <em>container's</em> own size, charged before the archive is opened — the only one that can
+/// be enforced ahead of the central directory.
 /// </description></item>
 /// <item><description>
 /// <b>Any rejection unwinds the whole extraction.</b> There is no half-installed state: every file
@@ -226,6 +246,14 @@ public sealed record ExtractResult(
 /// ordinary filenames elsewhere, where they do not.
 /// </para>
 /// <para>
+/// <b>What "success" is not.</b> A successful result says nothing was <em>refused</em>; it cannot say
+/// everything the archive's author packed came out. A tar cut at, or corrupted into, a zeroed header
+/// is indistinguishable from a tar that ended there, and no extractor can tell them apart from the
+/// bytes alone. Only a signed out-of-band manifest can — see
+/// <see cref="ExtractResult.Succeeded"/>, which spells out the obligation this pushes onto the
+/// installer.
+/// </para>
+/// <para>
 /// <b>TOCTOU.</b> Containment is proven against the filesystem as it stands at the moment of the
 /// check. An attacker who can swap a directory for a symlink between the resolve and the write wins
 /// that race — the inherent limit of every path-based check, inherited from
@@ -247,6 +275,19 @@ public static class SafeArchiveExtractor
 
     /// <summary>Default cap on the uncompressed bytes a single member may expand to (16 MiB).</summary>
     public const long DefaultMaxMemberBytes = 16L * 1024 * 1024;
+
+    /// <summary>
+    /// Default cap on the CONTAINER's own size — the bytes handed to <see cref="Extract"/>, before
+    /// anything is decompressed (128 MiB).
+    /// </summary>
+    /// <remarks>
+    /// Twice <see cref="DefaultMaxTotalBytes"/> rather than equal to it: a zip may store its members
+    /// uncompressed, so an archive sitting right at the total-uncompressed cap is already larger than
+    /// that cap once its local headers and central directory are counted, and a container cap set to a
+    /// knife-edge would refuse an archive the other caps accept. This is a coarse backstop, not a
+    /// tight bound — see the remarks on <see cref="Extract"/> for what it does and does not buy.
+    /// </remarks>
+    public const long DefaultMaxArchiveBytes = 128L * 1024 * 1024;
 
     /// <summary>Streaming copy buffer size. Rented, so a large archive does not churn the LOH.</summary>
     private const int CopyBufferSize = 81920;
@@ -277,18 +318,38 @@ public static class SafeArchiveExtractor
     /// <param name="maxMemberBytes">
     /// Cap on one member's uncompressed bytes. Defaults to <see cref="DefaultMaxMemberBytes"/>.
     /// </param>
+    /// <param name="maxArchiveBytes">
+    /// Cap on the container's own size, charged before the archive is opened. Defaults to
+    /// <see cref="DefaultMaxArchiveBytes"/>. Only enforceable on a seekable stream — see the remarks.
+    /// </param>
     /// <returns>
-    /// A result that is either a complete extraction or a typed refusal. <b>It never reports a partial
-    /// one</b>, and it never throws for hostile or corrupt archive content.
+    /// A result that is either an extraction in which nothing was refused, or a typed refusal.
+    /// <b>It never reports a partial one</b>, and it never throws for hostile or corrupt archive
+    /// content. See <see cref="ExtractResult.Succeeded"/> for what "nothing was refused" does — and
+    /// does not — promise about the archive's own completeness.
     /// </returns>
     /// <exception cref="ArgumentNullException"><paramref name="archive"/> is <see langword="null"/>.</exception>
     /// <exception cref="ArgumentOutOfRangeException">A cap is zero or negative.</exception>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="kind"/> is not a declared value.</exception>
     /// <remarks>
+    /// <para>
     /// The argument checks above are the only exceptions this can raise, and each is a caller bug
     /// rather than anything an archive can provoke. Everything the <em>archive</em> can do — a
     /// traversal, a link, a bomb, truncated bytes, an unreadable deflate stream — comes back as a
     /// failed <see cref="ExtractResult"/>.
+    /// </para>
+    /// <para>
+    /// <b>What <paramref name="maxArchiveBytes"/> buys, and what it does not.</b> The member-count cap
+    /// is charged per member <em>read</em>, but a zip's members are only reachable through its central
+    /// directory — and <see cref="ZipArchive"/> materializes that directory in full before it hands
+    /// back the first entry. So an archive declaring 200 000 empty members against a cap of 8 is
+    /// refused correctly, and still costs several times the container's size in allocation on the way
+    /// there (measured at ~6.4x for that shape). Capping the container bounds that amplification;
+    /// it does not remove it, and it cannot be charged at all on a stream that is not seekable, where
+    /// there is no length to read. <b>Caller obligation:</b> bound the bytes BEFORE they get here —
+    /// cap the download, and pass a <paramref name="maxArchiveBytes"/> sized to what you actually
+    /// expect rather than leaving the generous default in place for untrusted input.
+    /// </para>
     /// </remarks>
     public static ExtractResult Extract(
         Stream archive,
@@ -296,42 +357,70 @@ public static class SafeArchiveExtractor
         string destinationRoot,
         int maxMemberCount = DefaultMaxMemberCount,
         long maxTotalBytes = DefaultMaxTotalBytes,
-        long maxMemberBytes = DefaultMaxMemberBytes)
+        long maxMemberBytes = DefaultMaxMemberBytes,
+        long maxArchiveBytes = DefaultMaxArchiveBytes)
     {
         ArgumentNullException.ThrowIfNull(archive);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxMemberCount);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxTotalBytes);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxMemberBytes);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxArchiveBytes);
         if (kind is not (ArchiveKind.Zip or ArchiveKind.Tar))
         {
             throw new ArgumentOutOfRangeException(nameof(kind), kind, "unknown archive kind");
         }
 
         var session = new Session(maxMemberCount, maxTotalBytes, maxMemberBytes);
-        ExtractResult result;
+
+        // Pessimistic until proven otherwise, so the `finally` below unwinds even when an unexpected
+        // fault means `result` was never assigned at all.
+        ExtractResult result = Fail(ArchiveRejectionReason.MalformedArchive, null);
         try
         {
-            result = Run(archive, kind, destinationRoot, session);
+            try
+            {
+                result = Run(archive, kind, destinationRoot, session, maxArchiveBytes);
+            }
+            catch (Exception ex) when (IsArchiveFault(ex))
+            {
+                // Corrupt bytes, a truncated container, a deflate stream that does not decode — all
+                // indistinguishable from a deliberately malformed archive, and all a result rather
+                // than an exception. The catch list is enumerated rather than `catch (Exception)`:
+                // swallowing everything around a security check is how a check stops being one.
+                result = Fail(ArchiveRejectionReason.MalformedArchive, null);
+            }
         }
-        catch (Exception ex) when (IsArchiveFault(ex))
+        finally
         {
-            // Corrupt bytes, a truncated container, a deflate stream that does not decode — all
-            // indistinguishable from a deliberately malformed archive, and all a result rather than
-            // an exception. The catch list is enumerated rather than `catch (Exception)`: swallowing
-            // everything around a security check is how a check stops being one.
-            result = Fail(ArchiveRejectionReason.MalformedArchive, null);
-        }
-
-        if (!result.Succeeded)
-        {
-            session.Rollback();
+            // In a `finally` and keyed on the pessimistic default, so that the unwind cannot be
+            // bypassed by ANY exit path — including an exception this class does not recognise, which
+            // is deliberately allowed to propagate (it is a bug here, not a hostile archive) but must
+            // not propagate over a half-written destination. That combination is exactly what shipped:
+            // `TarReader` raises `InvalidOperationException` for a metadata header ('L'/'K'/'x'/'g')
+            // whose declared size overruns the data behind it, the type was not on the recognised
+            // list, and the rollback sat on the non-throwing path — so a crafted tar both crashed the
+            // caller and left its already-extracted members on disk.
+            if (!result.Succeeded)
+            {
+                session.Rollback();
+            }
         }
 
         return result;
     }
 
-    private static ExtractResult Run(Stream archive, ArchiveKind kind, string destinationRoot, Session session)
+    private static ExtractResult Run(
+        Stream archive, ArchiveKind kind, string destinationRoot, Session session, long maxArchiveBytes)
     {
+        // Before `ZipArchive`/`TarReader` sees a byte: a container this big cannot produce a compliant
+        // extraction, and refusing it here is the only cap that costs nothing to charge. A stream with
+        // no length (a network stream) is not refused for lacking one — the caller was told to bound
+        // those itself.
+        if (archive.CanSeek && archive.Length - archive.Position > maxArchiveBytes)
+        {
+            return Fail(ArchiveRejectionReason.ArchiveTooLarge, null);
+        }
+
         if (string.IsNullOrWhiteSpace(destinationRoot))
         {
             // Fail closed, exactly as `ContainedPath` does for an empty root: resolving against the
@@ -373,7 +462,12 @@ public static class SafeArchiveExtractor
             // whatever the archive author felt like writing.
             bool isDirectory = name.EndsWith('/');
 
-            ExtractResult? failure = isDirectory
+            ExtractResult? failure = IsZipLinkMember(entry)
+                // Checked BEFORE the name's shape: the member type is what the entry declares itself
+                // to be, and a link that dressed its name up as a directory would otherwise be read
+                // as one.
+                ? CountThen(session, name, ArchiveRejectionReason.LinkMember)
+                : isDirectory
                 ? ProcessDirectory(session, root, name)
                 // `entry.Open()` hands back a decompressing stream this call owns and must dispose.
                 : ProcessFile(session, root, name, entry.Open, ownsData: true);
@@ -386,6 +480,33 @@ public static class SafeArchiveExtractor
 
         return null;
     }
+
+    /// <summary>
+    /// True when a zip member declares itself a symbolic link.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Tar has a type flag per member and <see cref="TarReader"/> surfaces it; zip has no such field,
+    /// so a Unix-authored archive puts the member's <c>st_mode</c> in the HIGH sixteen bits of
+    /// <see cref="ZipArchiveEntry.ExternalAttributes"/> — the same convention <c>zip -y</c> writes and
+    /// <c>unzip</c> reads. <c>S_IFLNK</c> is <c>0xA000</c> under the <c>0xF000</c> type mask, and the
+    /// member's BODY is then the link target.
+    /// </para>
+    /// <para>
+    /// This extractor cannot create a link, so before this check such a member was written as an
+    /// ordinary file whose content happened to be an outside path — nothing escaped, but the class
+    /// documents "link members are refused wholesale" with no format caveat, and a downstream
+    /// re-packer handed that file resurrects the link. Refusing it keeps the documented rule true for
+    /// both containers.
+    /// </para>
+    /// <para>
+    /// A DOS-authored zip puts its attribute byte in the LOW sixteen bits and leaves the high half
+    /// zero, so it cannot collide: <c>0 &amp; 0xF000</c> is not <c>0xA000</c>. Hard links have no zip
+    /// representation at all — the format has no such member type.
+    /// </para>
+    /// </remarks>
+    private static bool IsZipLinkMember(ZipArchiveEntry entry)
+        => ((entry.ExternalAttributes >> 16) & 0xF000) == 0xA000;
 
     private static ExtractResult? ExtractTar(Stream archive, Session session, string root)
     {
@@ -587,7 +708,13 @@ public static class SafeArchiveExtractor
         or ObjectDisposedException
         or ArgumentException             // a BCL reader rejecting a name before we see it
         or OverflowException
-        or FormatException;
+        or FormatException
+        // `TarReader` raises this — not `InvalidDataException` — when a METADATA header ('L'/'K' GNU
+        // long name, 'x'/'g' pax) declares a size larger than the data that follows it: "The value of
+        // the size field for the current entry of type 'LongPath' is greater than the expected
+        // length." It is a property of the archive's bytes, so it belongs on this list; it was missed
+        // because the corpus had no tar metadata-header row at all, which it now does.
+        or InvalidOperationException;
 
     /// <summary>
     /// Everything one <see cref="Extract"/> call created, so that it can all be taken back — plus the
@@ -715,9 +842,18 @@ public static class SafeArchiveExtractor
                 destination = new FileStream(
                     resolved, FileMode.CreateNew, FileAccess.Write, FileShare.None, CopyBufferSize);
             }
-            catch (IOException)
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
-                return Fail(ArchiveRejectionReason.DuplicateMember, name);
+                // Which failure it was decides the reason, and asking the filesystem is the only way
+                // to know: `CreateNew` reports a collision as an `IOException`, but so does a name the
+                // volume will not store, a path whose parent vanished, and a full disk — and a
+                // read-only destination reports `UnauthorizedAccessException`. Reporting all of them
+                // as `DuplicateMember` was simply false, and a false reason is worse than a vague one:
+                // it tells the caller to retry into a clean directory, which will fail identically
+                // forever.
+                return File.Exists(resolved) || Directory.Exists(resolved)
+                    ? Fail(ArchiveRejectionReason.DuplicateMember, name)
+                    : Fail(ArchiveRejectionReason.DestinationUnusable, name);
             }
 
             // Recorded the instant the file exists on disk, before a single byte goes in, so a copy
