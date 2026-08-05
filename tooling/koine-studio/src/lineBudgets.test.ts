@@ -169,7 +169,11 @@ const LINE_BUDGETS: readonly LineBudget[] = [
   // build clobbering fresher cache state after a later invalidateModelDerivedCaches() call — a
   // `cacheGeneration` counter, bumped there and captured/checked around each post-await write. Measured
   // end-state (1316), ceil(1316 × 1.02) = 1343.
-  { file: 'src/shell/inspectorController.tsx', maxLines: 1343 },
+  // Raised 1343 → 1392: #1737 makes the Domain navigator's tactical-leaf jump file-aware — the
+  // `bestJumpSpan` helper (prefers the resolved element's own diagram-node span over an active-document
+  // + glossary-name-range fallback, mirroring loadHistory's same rule) plus `tacticalHandlers.goto`
+  // routing through it. Measured end-state (1364), ceil(1364 × 1.02) = 1392.
+  { file: 'src/shell/inspectorController.tsx', maxLines: 1392 },
   // Frozen 2026-07-09 at 281 LOC, ceil(281 × 1.02) = 287. #985 Task 1's new sibling — the Context Map
   // panel (maxGraph handle lifecycle, Graph/Table toggle, hover tooltip, ADR 0009 scope-focus repaint)
   // extracted from inspectorController.tsx. Guards it from regrowing unguarded — see #981/#757.
