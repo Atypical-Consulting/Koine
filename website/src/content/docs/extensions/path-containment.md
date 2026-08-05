@@ -176,7 +176,7 @@ It proves every path-capable parameter is *accounted for* — routed, or written
 does not prove they are all contained, and some are deliberately not. The absolute explorer tokens
 `move_entry`, `delete_entry` and `rename_entry` take are user-chosen paths in the file-dialog trust
 class, which this work put out of scope on purpose; their allowlist rows say so in as many words, and
-issue #1950 tracks containing them. A row claiming a safety that does not hold would be worse than no
+issue #1957 tracks containing them. A row claiming a safety that does not hold would be worse than no
 row at all.
 :::
 

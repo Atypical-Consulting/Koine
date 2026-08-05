@@ -73,7 +73,7 @@ namespace Koine.Compiler.Tests;
 /// not, and say so. <c>move_entry</c>'s <c>token</c>, <c>delete_entry</c>'s and
 /// <c>rename_entry</c>'s are absolute explorer-minted paths that nothing re-validates on the way
 /// back into the host; containing them is a behaviour change in the file-dialog trust class that
-/// #1942's Non-goals put out of scope, and issue #1950 tracks it. The value of the guard is that the
+/// #1942's Non-goals put out of scope, and issue #1957 tracks it. The value of the guard is that the
 /// NEXT one cannot be added without somebody noticing.
 /// </para>
 /// <para>
@@ -194,7 +194,7 @@ public class PathSinkGuardTests
     /// repetitive on purpose: the earlier, name-shaped rule produced a short table by simply never
     /// looking at <c>token</c>, <c>dir</c>, <c>contents</c> or <c>cwd</c>, and a short table that has
     /// not looked is worse than a long one that has. Some rows say plainly that the value is a path
-    /// NOTHING validates — see the #1950 rows. A row claiming a safety that does not hold would be
+    /// NOTHING validates — see the #1957 rows. A row claiming a safety that does not hold would be
     /// worse than no row at all.
     /// </para>
     /// </remarks>
@@ -242,26 +242,26 @@ public class PathSinkGuardTests
 
         // --- Rule 2: user-chosen absolute paths from the OS dialog --------------------------------
         ("read_text_file", UnroutedCommand, "`path: String`",
-            "an absolute path the user picked in the OS file dialog (or an explorer token minted from it). NOT contained — the user's own choice IS the root, so there is no root to contain it against; the explorer-token half of this trust class is tracked by #1950"),
+            "an absolute path the user picked in the OS file dialog (or an explorer token minted from it). NOT contained — the user's own choice IS the root, so there is no root to contain it against; the explorer-token half of this trust class is tracked by #1957"),
         ("write_text_file", UnroutedCommand, "`path: String`",
-            "the save side of the same user-chosen dialog path, and likewise NOT contained (#1950)"),
+            "the save side of the same user-chosen dialog path, and likewise NOT contained (#1957)"),
         ("write_bytes", UnroutedCommand, "`path: String`",
-            "the absolute save-zip target the user chose in the OS dialog; write_text_file cannot carry binary. Likewise NOT contained (#1950)"),
+            "the absolute save-zip target the user chose in the OS dialog; write_text_file cannot carry binary. Likewise NOT contained (#1957)"),
 
-        // --- Rule 2: explorer tokens that are GENUINELY UNVALIDATED — issue #1950 -----------------
+        // --- Rule 2: explorer tokens that are GENUINELY UNVALIDATED — issue #1957 -----------------
         //
         // Said plainly rather than dressed up. `token` is an absolute path the host minted for an
         // explorer row and handed to the webview; nothing re-checks it on the way back in, so a
         // caller that can fabricate one reaches any file the user can. Containing it is a behaviour
         // change to user-facing commands in the file-dialog trust class, which #1942 put out of scope
-        // deliberately — #1950 tracks it. These rows exist to make that a written, reviewable fact
+        // deliberately — #1957 tracks it. These rows exist to make that a written, reviewable fact
         // rather than a silence.
         ("rename_entry", UnroutedCommand, "`token: String`",
-            "an absolute explorer-minted token, NOT contained today (#1950). The rename cannot TRAVEL — is_safe_name plus a join onto the token's own parent keeps the entry where it is — but the token names the file, so an arbitrary token renames an arbitrary file"),
+            "an absolute explorer-minted token, NOT contained today (#1957). The rename cannot TRAVEL — is_safe_name plus a join onto the token's own parent keeps the entry where it is — but the token names the file, so an arbitrary token renames an arbitrary file"),
         ("delete_entry", UnroutedCommand, "`token: String`",
-            "an absolute explorer-minted token going straight to remove_dir_all/remove_file, NOT contained today (#1950)"),
+            "an absolute explorer-minted token going straight to remove_dir_all/remove_file, NOT contained today (#1957)"),
         ("move_entry", UnroutedCommand, "`token: String`",
-            "the move SOURCE: an absolute explorer-minted token reaching fs::rename and copy_recursive, NOT contained today (#1950). Only the DESTINATION half (dest_folder + new_rel_path) goes through resolve_in — precisely the asymmetry a per-COMMAND guard reported as satisfied and a per-PARAMETER one does not"),
+            "the move SOURCE: an absolute explorer-minted token reaching fs::rename and copy_recursive, NOT contained today (#1957). Only the DESTINATION half (dest_folder + new_rel_path) goes through resolve_in — precisely the asymmetry a per-COMMAND guard reported as satisfied and a per-PARAMETER one does not"),
 
         // --- Rule 2: pathspecs and arguments the git BINARY resolves ------------------------------
         //
@@ -664,7 +664,7 @@ public class PathSinkGuardTests
             + "resolves symlinks.\n\n"
             + "This guard proves every such parameter is ACCOUNTED FOR — routed, or written down with a "
             + "reason. It does not prove they are all contained, and some allowlisted ones explicitly are "
-            + "not (see the #1950 rows). So either route it through `resolve_in(folder, rel_path)` "
+            + "not (see the #1957 rows). So either route it through `resolve_in(folder, rel_path)` "
             + "(src/lib.rs) and USE THE PATH IT RETURNS — re-deriving `folder.join(rel_path)` afterwards "
             + "throws away exactly the symlink resolution that makes it safe — or add a row to this "
             + "test's RustAllowlist AND to the twin table in `paths.rs`'s "

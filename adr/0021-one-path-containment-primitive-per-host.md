@@ -82,7 +82,7 @@ We will:
    its two path arguments cannot pass on the strength of the other. Every exception is a named
    allowlist row with a written justification, and a stale row fails too. **This is an accounting
    property, not a safety property:** some rows describe parameters that genuinely are not contained
-   (the absolute explorer tokens `move_entry`/`delete_entry`/`rename_entry` take, tracked by #1950),
+   (the absolute explorer tokens `move_entry`/`delete_entry`/`rename_entry` take, tracked by #1957),
    and they say so. What the gate buys is that the next one cannot appear unnoticed.
 6. Run the platform-dependent half of this on **macOS and Windows**, not only Linux, by widening the
    existing `sandbox-confinement` CI job's filter — Windows path semantics (`\\?\`, drive-relative

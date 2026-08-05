@@ -1233,7 +1233,7 @@ mod tests {
     // WHAT IT PROVES, EXACTLY. Every `#[tauri::command]` parameter whose type could name a path is
     // either handed to the containment primitive or carries an allowlist row. That is an
     // ACCOUNTING property, not a safety property: several rows below describe parameters that are
-    // genuinely not contained (the explorer tokens, tracked by #1950). The guard's job is that
+    // genuinely not contained (the explorer tokens, tracked by #1957). The guard's job is that
     // nobody adds a new one WITHOUT NOTICING — the first version of it keyed the obligation on the
     // parameter's NAME, which is how `move_entry` came to count as satisfied while its `token`
     // reached `fs::rename` unexamined, and how `delete_entry` was never reported at all.
@@ -1357,44 +1357,44 @@ mod tests {
             "read_text_file",
             UNROUTED_COMMAND,
             "`path: String`",
-            "an absolute path the user picked in the OS file dialog (or an explorer token minted from it). NOT contained — the user's own choice IS the root; the explorer-token half of this trust class is tracked by #1950",
+            "an absolute path the user picked in the OS file dialog (or an explorer token minted from it). NOT contained — the user's own choice IS the root; the explorer-token half of this trust class is tracked by #1957",
         ),
         (
             "write_text_file",
             UNROUTED_COMMAND,
             "`path: String`",
-            "the save side of the same user-chosen dialog path — likewise NOT contained (#1950)",
+            "the save side of the same user-chosen dialog path — likewise NOT contained (#1957)",
         ),
         (
             "write_bytes",
             UNROUTED_COMMAND,
             "`path: String`",
-            "the absolute save-zip target the user chose in the OS dialog; write_text_file cannot carry binary. NOT contained (#1950)",
+            "the absolute save-zip target the user chose in the OS dialog; write_text_file cannot carry binary. NOT contained (#1957)",
         ),
-        // --- unrouted-command: explorer tokens that are GENUINELY UNVALIDATED (#1950) ---------------
+        // --- unrouted-command: explorer tokens that are GENUINELY UNVALIDATED (#1957) ---------------
         //
         // Say it plainly rather than dressing it up. `token` is an absolute path the host minted for
         // an explorer row and handed to the webview; nothing re-checks it on the way back in, so a
         // caller that can fabricate one reaches any file the user can. Containing it is a behaviour
         // change to user-facing commands in the file-dialog trust class, which #1942 put out of scope
-        // on purpose — #1950 tracks it. A row that claimed these were safe would be worse than no row.
+        // on purpose — #1957 tracks it. A row that claimed these were safe would be worse than no row.
         (
             "rename_entry",
             UNROUTED_COMMAND,
             "`token: String`",
-            "an absolute explorer-minted token, NOT contained today (#1950). The rename itself cannot travel — is_safe_name plus a join onto the token's OWN parent keeps it in place — but the token names the file, so an arbitrary one renames an arbitrary file",
+            "an absolute explorer-minted token, NOT contained today (#1957). The rename itself cannot travel — is_safe_name plus a join onto the token's OWN parent keeps it in place — but the token names the file, so an arbitrary one renames an arbitrary file",
         ),
         (
             "delete_entry",
             UNROUTED_COMMAND,
             "`token: String`",
-            "an absolute explorer-minted token going straight to remove_dir_all/remove_file, NOT contained today (#1950)",
+            "an absolute explorer-minted token going straight to remove_dir_all/remove_file, NOT contained today (#1957)",
         ),
         (
             "move_entry",
             UNROUTED_COMMAND,
             "`token: String`",
-            "the move SOURCE: an absolute explorer-minted token reaching fs::rename and copy_recursive, NOT contained today (#1950). Only the DESTINATION half (dest_folder + new_rel_path) goes through resolve_in — which is exactly the asymmetry a per-command guard reported as satisfied and a per-parameter one does not",
+            "the move SOURCE: an absolute explorer-minted token reaching fs::rename and copy_recursive, NOT contained today (#1957). Only the DESTINATION half (dest_folder + new_rel_path) goes through resolve_in — which is exactly the asymmetry a per-command guard reported as satisfied and a per-parameter one does not",
         ),
         // --- unrouted-command: pathspecs the git BINARY resolves ------------------------------------
         //
@@ -1813,7 +1813,7 @@ mod tests {
              happened.\n\n\
              This guard proves that every such parameter is ACCOUNTED FOR — routed, or written down \
              with a reason. It does not prove they are all contained, and some allowlisted ones are \
-             explicitly not (see the #1950 rows). So: route it through `resolve_in(folder, rel_path)` \
+             explicitly not (see the #1957 rows). So: route it through `resolve_in(folder, rel_path)` \
              and USE THE PATH IT RETURNS — re-deriving `folder.join(rel_path)` afterwards throws away \
              the symlink resolution that makes it safe — or add a row to SINK_ALLOWLIST here AND to \
              PathSinkGuardTests.RustAllowlist in the .NET suite. The row must state what the value \
