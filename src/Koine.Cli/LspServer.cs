@@ -2173,7 +2173,7 @@ internal sealed class LspServer
             }
 
             var semantic = new Compiler.Ast.SemanticModel(model);
-            return ScenarioService.Run(semantic, target, operation, given, args);
+            return ScenarioService.Run(semantic, target, operation, given, args, sources);
         }
         catch (Exception ex)
         {
