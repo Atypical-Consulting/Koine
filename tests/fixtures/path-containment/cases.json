@@ -1,0 +1,568 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "relative-under-root",
+      "setup": [{ "kind": "file", "path": "themes/dark.json" }],
+      "candidate": "themes/dark.json",
+      "expect": "accept",
+      "resolvesTo": "themes/dark.json",
+      "platforms": ["unix", "windows"]
+    },
+    {
+      "name": "dot-slash-prefix-is-dropped",
+      "setup": [{ "kind": "file", "path": "themes/dark.json" }],
+      "candidate": "./themes/dark.json",
+      "expect": "accept",
+      "resolvesTo": "themes/dark.json",
+      "platforms": ["unix", "windows"]
+    },
+    {
+      "name": "redundant-separators-collapse",
+      "setup": [{ "kind": "file", "path": "themes/dark.json" }],
+      "candidate": "themes//dark.json",
+      "expect": "accept",
+      "resolvesTo": "themes/dark.json",
+      "platforms": ["unix", "windows"]
+    },
+    {
+      "name": "trailing-separator-is-dropped",
+      "setup": [{ "kind": "dir", "path": "themes" }],
+      "candidate": "themes/",
+      "expect": "accept",
+      "resolvesTo": "themes",
+      "platforms": ["unix", "windows"]
+    },
+    {
+      "name": "nonexistent-leaf-under-an-existing-dir",
+      "setup": [{ "kind": "dir", "path": "new/dir" }],
+      "candidate": "new/dir/out.go",
+      "expect": "accept",
+      "resolvesTo": "new/dir/out.go",
+      "platforms": ["unix", "windows"]
+    },
+    {
+      "name": "fully-nonexistent-tail",
+      "setup": [],
+      "candidate": "new-dir/nested/binary",
+      "expect": "accept",
+      "resolvesTo": "new-dir/nested/binary",
+      "platforms": ["unix", "windows"]
+    },
+    {
+      "name": "a-directory-merely-named-escape",
+      "setup": [],
+      "candidate": "escape/deep/nested/file.txt",
+      "expect": "accept",
+      "resolvesTo": "escape/deep/nested/file.txt",
+      "platforms": ["unix", "windows"]
+    },
+    {
+      "name": "interior-dot-dot-stays-inside",
+      "setup": [{ "kind": "file", "path": "b.json" }],
+      "candidate": "a/../b.json",
+      "expect": "accept",
+      "resolvesTo": "b.json",
+      "platforms": ["unix", "windows"]
+    },
+    {
+      "name": "empty-candidate-is-the-root",
+      "setup": [],
+      "candidate": "",
+      "expect": "accept",
+      "resolvesTo": "",
+      "platforms": ["unix", "windows"]
+    },
+    {
+      "name": "current-dir-candidate-is-the-root",
+      "setup": [],
+      "candidate": ".",
+      "expect": "accept",
+      "resolvesTo": "",
+      "platforms": ["unix", "windows"]
+    },
+    {
+      "name": "dot-dot-chain-landing-exactly-on-the-root",
+      "setup": [],
+      "candidate": "a/b/c/../../..",
+      "expect": "accept",
+      "resolvesTo": "",
+      "platforms": ["unix", "windows"]
+    },
+    {
+      "name": "a-leading-dot-is-an-ordinary-name",
+      "setup": [],
+      "candidate": ".koinerc",
+      "expect": "accept",
+      "resolvesTo": ".koinerc",
+      "platforms": ["unix", "windows"]
+    },
+    {
+      "name": "a-name-beginning-with-two-dots-is-an-ordinary-name",
+      "setup": [],
+      "candidate": "..koinerc/asset.png",
+      "expect": "accept",
+      "resolvesTo": "..koinerc/asset.png",
+      "platforms": ["unix", "windows"]
+    },
+    {
+      "name": "a-non-ascii-name-is-an-ordinary-name",
+      "setup": [{ "kind": "file", "path": "日本語/文書.txt" }],
+      "candidate": "日本語/文書.txt",
+      "expect": "accept",
+      "resolvesTo": "日本語/文書.txt",
+      "platforms": ["unix", "windows"]
+    },
+    {
+      "name": "over-the-component-cap",
+      "setup": [],
+      "candidate": "a/",
+      "candidateRepeat": 257,
+      "expect": "reject",
+      "reason": "malformed",
+      "platforms": ["unix", "windows"]
+    },
+    {
+      "name": "over-the-length-cap",
+      "setup": [],
+      "candidate": "a",
+      "candidateRepeat": 4097,
+      "expect": "reject",
+      "reason": "malformed",
+      "platforms": ["unix", "windows"]
+    },
+    {
+      "name": "a-nul-byte-in-a-name",
+      "setup": [],
+      "candidate": "themes/da\u0000rk.json",
+      "expect": "reject",
+      "reason": "malformed",
+      "platforms": ["unix", "windows"]
+    },
+    {
+      "name": "dot-dot-chain-one-step-past-the-root",
+      "setup": [],
+      "candidate": "a/b/c/../../../..",
+      "expect": "reject",
+      "reason": "traversal",
+      "platforms": ["unix", "windows"]
+    },
+    {
+      "name": "parent-traversal",
+      "setup": [],
+      "candidate": "../../etc/passwd",
+      "expect": "reject",
+      "reason": "traversal",
+      "platforms": ["unix", "windows"]
+    },
+    {
+      "name": "bare-parent-component",
+      "setup": [],
+      "candidate": "..",
+      "expect": "reject",
+      "reason": "traversal",
+      "platforms": ["unix", "windows"]
+    },
+    {
+      "name": "pop-above-the-root-then-back-in-by-name",
+      "setup": [{ "kind": "file", "path": "themes/dark.json" }],
+      "candidate": "../root/themes/dark.json",
+      "expect": "reject",
+      "reason": "traversal",
+      "platforms": ["unix", "windows"]
+    },
+    {
+      "name": "absolute-candidate",
+      "setup": [],
+      "candidate": "/etc/passwd",
+      "expect": "reject",
+      "reason": "absolute",
+      "platforms": ["unix", "windows"]
+    },
+    {
+      "name": "a-triple-dot-is-an-ordinary-name",
+      "setup": [],
+      "candidate": ".../asset.png",
+      "expect": "accept",
+      "resolvesTo": ".../asset.png",
+      "platforms": ["unix"]
+    },
+    {
+      "name": "a-trailing-space-is-an-ordinary-name-on-unix",
+      "setup": [],
+      "candidate": "a /evil.txt",
+      "expect": "accept",
+      "resolvesTo": "a /evil.txt",
+      "platforms": ["unix"]
+    },
+    {
+      "name": "a-backslash-is-an-ordinary-name-on-unix",
+      "setup": [],
+      "candidate": "..\\..\\evil",
+      "expect": "accept",
+      "resolvesTo": "..\\..\\evil",
+      "platforms": ["unix"]
+    },
+    {
+      "name": "a-colon-is-an-ordinary-name-on-unix",
+      "setup": [],
+      "candidate": "file.txt:stream",
+      "expect": "accept",
+      "resolvesTo": "file.txt:stream",
+      "platforms": ["unix"]
+    },
+    {
+      "name": "a-reserved-dos-device-name-is-an-ordinary-name-on-unix",
+      "setup": [],
+      "candidate": "NUL.txt",
+      "expect": "accept",
+      "resolvesTo": "NUL.txt",
+      "platforms": ["unix"]
+    },
+    {
+      "name": "symlink-to-an-existing-file-outside-the-root",
+      "setup": [
+        { "kind": "file", "path": "../outside/secret.txt" },
+        { "kind": "symlink", "path": "link", "target": "../outside" }
+      ],
+      "candidate": "link/secret.txt",
+      "expect": "reject",
+      "reason": "symlink-escape",
+      "platforms": ["unix"]
+    },
+    {
+      "name": "symlink-out-of-the-root-with-a-nonexistent-leaf",
+      "setup": [
+        { "kind": "dir", "path": "../outside" },
+        { "kind": "symlink", "path": "link", "target": "../outside" }
+      ],
+      "candidate": "link/brand-new.txt",
+      "expect": "reject",
+      "reason": "symlink-escape",
+      "platforms": ["unix"]
+    },
+    {
+      "name": "symlink-file-pointing-out-of-the-root",
+      "setup": [
+        { "kind": "file", "path": "../outside/secret.txt" },
+        { "kind": "symlink", "path": "leak.txt", "target": "../outside/secret.txt" }
+      ],
+      "candidate": "leak.txt",
+      "expect": "reject",
+      "reason": "symlink-escape",
+      "platforms": ["unix"]
+    },
+    {
+      "name": "symlink-nested-under-a-real-directory-escapes",
+      "setup": [
+        { "kind": "file", "path": "../outside/secret.txt" },
+        { "kind": "dir", "path": "assets" },
+        { "kind": "symlink", "path": "assets/link", "target": "../../outside" }
+      ],
+      "candidate": "assets/link/secret.txt",
+      "expect": "reject",
+      "reason": "symlink-escape",
+      "platforms": ["unix"]
+    },
+    {
+      "name": "symlink-inside-the-root-is-accepted-and-reported-resolved",
+      "setup": [
+        { "kind": "file", "path": "target/file.txt" },
+        { "kind": "symlink", "path": "inner", "target": "target" }
+      ],
+      "candidate": "inner/file.txt",
+      "expect": "accept",
+      "resolvesTo": "target/file.txt",
+      "platforms": ["unix"]
+    },
+    {
+      "name": "symlink-inside-the-root-with-a-nonexistent-leaf",
+      "setup": [
+        { "kind": "dir", "path": "target" },
+        { "kind": "symlink", "path": "inner", "target": "target" }
+      ],
+      "candidate": "inner/not-yet.txt",
+      "expect": "accept",
+      "resolvesTo": "target/not-yet.txt",
+      "platforms": ["unix"]
+    },
+    {
+      "name": "dot-dot-cancels-a-symlink-lexically-before-the-filesystem-is-consulted",
+      "setup": [
+        { "kind": "file", "path": "b.json" },
+        { "kind": "dir", "path": "../outside" },
+        { "kind": "symlink", "path": "inner", "target": "../outside" }
+      ],
+      "candidate": "inner/../b.json",
+      "expect": "accept",
+      "resolvesTo": "b.json",
+      "platforms": ["unix"]
+    },
+    {
+      "name": "symlink-that-leaves-the-root-and-comes-back-is-accepted",
+      "setup": [
+        { "kind": "file", "path": "target/file.txt" },
+        { "kind": "symlink", "path": "loop", "target": "../root/target" }
+      ],
+      "candidate": "loop/file.txt",
+      "expect": "accept",
+      "resolvesTo": "target/file.txt",
+      "platforms": ["unix"]
+    },
+    {
+      "name": "dangling-symlink-itself",
+      "setup": [{ "kind": "symlink", "path": "link", "target": "../outside/not-created" }],
+      "candidate": "link",
+      "expect": "reject",
+      "reason": "symlink-escape",
+      "platforms": ["unix"]
+    },
+    {
+      "name": "dangling-symlink-with-a-child",
+      "setup": [{ "kind": "symlink", "path": "link", "target": "../outside/not-created" }],
+      "candidate": "link/child.txt",
+      "expect": "reject",
+      "reason": "symlink-escape",
+      "platforms": ["unix"]
+    },
+    {
+      "name": "an-unreadable-ancestor-is-not-walked-past",
+      "setup": [
+        { "kind": "dir", "path": "../outside" },
+        { "kind": "dir", "path": "d", "mode": "000" },
+        { "kind": "symlink", "path": "d/link", "target": "../../outside" }
+      ],
+      "candidate": "d/link/pwned.txt",
+      "expect": "reject",
+      "reason": "symlink-escape",
+      "platforms": ["unix"]
+    },
+    {
+      "name": "sibling-whose-name-merely-prefixes-the-root",
+      "setup": [
+        { "kind": "file", "path": "../rootevil/loot.txt" },
+        { "kind": "symlink", "path": "link", "target": "../rootevil" }
+      ],
+      "candidate": "link/loot.txt",
+      "expect": "reject",
+      "reason": "symlink-escape",
+      "platforms": ["unix"]
+    },
+    {
+      "name": "windows-backslash-is-a-separator-under-the-root",
+      "setup": [{ "kind": "file", "path": "themes/dark.json" }],
+      "candidate": "themes\\dark.json",
+      "expect": "accept",
+      "resolvesTo": "themes/dark.json",
+      "platforms": ["windows"]
+    },
+    {
+      "name": "windows-containment-is-case-insensitive",
+      "setup": [{ "kind": "file", "path": "Themes/Dark.json" }],
+      "candidate": "themes\\dark.json",
+      "expect": "accept",
+      "resolvesTo": "Themes/Dark.json",
+      "platforms": ["windows"]
+    },
+    {
+      "name": "windows-a-name-merely-starting-with-a-device-name",
+      "setup": [],
+      "candidate": "CONFIG",
+      "expect": "accept",
+      "resolvesTo": "CONFIG",
+      "platforms": ["windows"]
+    },
+    {
+      "name": "windows-a-name-merely-starting-with-com",
+      "setup": [],
+      "candidate": "COMMON.txt",
+      "expect": "accept",
+      "resolvesTo": "COMMON.txt",
+      "platforms": ["windows"]
+    },
+    {
+      "name": "windows-backslash-traversal",
+      "setup": [],
+      "candidate": "..\\..\\evil",
+      "expect": "reject",
+      "reason": "traversal",
+      "platforms": ["windows"]
+    },
+    {
+      "name": "windows-interior-backslash-traversal",
+      "setup": [],
+      "candidate": "themes\\..\\..\\evil",
+      "expect": "reject",
+      "reason": "traversal",
+      "platforms": ["windows"]
+    },
+    {
+      "name": "windows-verbatim-prefix",
+      "setup": [],
+      "candidate": "\\\\?\\C:\\Windows\\System32\\drivers\\etc\\hosts",
+      "expect": "reject",
+      "reason": "absolute",
+      "platforms": ["windows"]
+    },
+    {
+      "name": "windows-drive-absolute",
+      "setup": [],
+      "candidate": "C:\\Windows\\System32\\evil.dll",
+      "expect": "reject",
+      "reason": "absolute",
+      "platforms": ["windows"]
+    },
+    {
+      "name": "windows-drive-relative",
+      "setup": [],
+      "candidate": "C:evil",
+      "expect": "reject",
+      "reason": "absolute",
+      "platforms": ["windows"]
+    },
+    {
+      "name": "windows-rooted-without-a-drive",
+      "setup": [],
+      "candidate": "\\Windows\\evil.dll",
+      "expect": "reject",
+      "reason": "absolute",
+      "platforms": ["windows"]
+    },
+    {
+      "name": "windows-unc-share",
+      "setup": [],
+      "candidate": "\\\\attacker\\share\\evil.dll",
+      "expect": "reject",
+      "reason": "absolute",
+      "platforms": ["windows"]
+    },
+    {
+      "name": "windows-alternate-data-stream",
+      "setup": [],
+      "candidate": "file.txt:stream",
+      "expect": "reject",
+      "reason": "absolute",
+      "platforms": ["windows"]
+    },
+    {
+      "name": "windows-alternate-data-stream-on-a-nested-name",
+      "setup": [],
+      "candidate": "themes\\dark.json:evil",
+      "expect": "reject",
+      "reason": "absolute",
+      "platforms": ["windows"]
+    },
+    {
+      "name": "windows-reserved-device-con",
+      "setup": [],
+      "candidate": "CON",
+      "expect": "reject",
+      "reason": "absolute",
+      "platforms": ["windows"]
+    },
+    {
+      "name": "windows-reserved-device-lowercase-nul",
+      "setup": [],
+      "candidate": "nul",
+      "expect": "reject",
+      "reason": "absolute",
+      "platforms": ["windows"]
+    },
+    {
+      "name": "windows-reserved-device-with-an-extension",
+      "setup": [],
+      "candidate": "NUL.txt",
+      "expect": "reject",
+      "reason": "absolute",
+      "platforms": ["windows"]
+    },
+    {
+      "name": "windows-reserved-device-with-a-trailing-space",
+      "setup": [],
+      "candidate": "CON ",
+      "expect": "reject",
+      "reason": "absolute",
+      "platforms": ["windows"]
+    },
+    {
+      "name": "windows-reserved-device-com1",
+      "setup": [],
+      "candidate": "COM1",
+      "expect": "reject",
+      "reason": "absolute",
+      "platforms": ["windows"]
+    },
+    {
+      "name": "windows-reserved-device-lpt9",
+      "setup": [],
+      "candidate": "LPT9",
+      "expect": "reject",
+      "reason": "absolute",
+      "platforms": ["windows"]
+    },
+    {
+      "name": "windows-reserved-device-in-a-subdirectory",
+      "setup": [],
+      "candidate": "themes\\PRN",
+      "expect": "reject",
+      "reason": "absolute",
+      "platforms": ["windows"]
+    },
+    {
+      "name": "windows-reserved-device-conin",
+      "setup": [],
+      "candidate": "CONIN$",
+      "expect": "reject",
+      "reason": "absolute",
+      "platforms": ["windows"]
+    },
+    {
+      "name": "windows-com0-is-not-a-reserved-device",
+      "setup": [],
+      "candidate": "COM0",
+      "expect": "accept",
+      "resolvesTo": "COM0",
+      "platforms": ["windows"]
+    },
+    {
+      "name": "windows-a-parent-component-with-a-trailing-space",
+      "setup": [],
+      "candidate": ".. \\evil.txt",
+      "expect": "reject",
+      "reason": "traversal",
+      "platforms": ["windows"]
+    },
+    {
+      "name": "windows-a-current-dir-component-with-a-trailing-space",
+      "setup": [],
+      "candidate": ". \\a.txt",
+      "expect": "accept",
+      "resolvesTo": "a.txt",
+      "platforms": ["windows"]
+    },
+    {
+      "name": "windows-a-name-with-a-trailing-space",
+      "setup": [],
+      "candidate": "a \\evil.txt",
+      "expect": "reject",
+      "reason": "malformed",
+      "platforms": ["windows"]
+    },
+    {
+      "name": "windows-a-name-with-a-trailing-dot",
+      "setup": [],
+      "candidate": "evil.txt.",
+      "expect": "reject",
+      "reason": "malformed",
+      "platforms": ["windows"]
+    },
+    {
+      "name": "windows-a-triple-dot-is-refused",
+      "setup": [],
+      "candidate": "...\\asset.png",
+      "expect": "reject",
+      "reason": "malformed",
+      "platforms": ["windows"]
+    }
+  ]
+}

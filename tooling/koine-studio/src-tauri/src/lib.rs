@@ -16,7 +16,13 @@
 
 mod collab;
 mod noise;
+// `pub` unlike its siblings: this module is a self-contained security primitive, and exporting it
+// from the crate root is the honest description — it is the containment rule, meant to be reachable
+// from every module that touches a third-party path. The four workspace-mutation commands below
+// (`list_dir`, `create_file`, `create_folder`, `move_entry`) are its first in-crate consumers.
+pub mod paths;
 
+use crate::paths::{contained_path, PathEscape};
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::path::PathBuf;
 use std::process::{Child, ChildStdin, Command, Stdio};
@@ -1481,15 +1487,102 @@ fn is_koi_file(path: &std::path::Path) -> bool {
         .is_some_and(|e| e.eq_ignore_ascii_case("koi"))
 }
 
-/// A caller-supplied relative path is safe only if it is non-empty, not absolute, and made entirely
-/// of normal components (no `.`, `..`, root or drive prefix) — defence in depth so a name typed in
-/// the UI can never write outside the opened workspace folder.
+/// A caller-supplied relative path is *syntactically* usable only if it is non-empty, not absolute,
+/// and made entirely of normal components (no `.`, `..`, root or drive prefix).
+///
+/// **Necessary, not sufficient — never call this on its own.** It is a purely LEXICAL screen: it
+/// never touches the filesystem, so a component that is a symlink pointing out of the workspace is
+/// one perfectly ordinary `Normal` component to it, and the `join` that follows lands outside. That
+/// is the hole CVE-2026-27976 went through. Containment is decided by [`resolve_in`], which runs
+/// this screen and then resolves the result against the real filesystem.
+///
+/// It is *kept* in front of that primitive on purpose, because it refuses two shapes the primitive
+/// deliberately accepts and these sinks must not:
+///
+/// * an **empty** or `.` candidate, which denotes the workspace root itself — a fine answer to "is
+///   it inside", a catastrophic one for `create_folder`/`move_entry`, which would then operate on
+///   the root;
+/// * an **interior `..`**, which the primitive normalizes away (`docs/../adr` means `adr`). A name
+///   arriving from the UI or an extension manifest should mean what it reads like.
+///
+/// It also keeps a hostile string from costing a single `stat`, since it decides before any
+/// filesystem access happens.
 fn is_safe_relpath(rel: &str) -> bool {
     !rel.is_empty()
         && !std::path::Path::new(rel).is_absolute()
         && std::path::Path::new(rel)
             .components()
             .all(|c| matches!(c, std::path::Component::Normal(_)))
+}
+
+/// Resolve a caller-supplied RELATIVE path to a real path inside `folder`, or refuse it — the one
+/// gate every workspace-mutation command puts a third-party-influenced path through (#1942).
+///
+/// Two screens, and both are load-bearing. [`is_safe_relpath`] rejects the malformed and
+/// root-denoting shapes without touching the disk; [`contained_path`] then does the part no lexical
+/// check can, resolving symlinks against the real filesystem before deciding whether the result is
+/// still under `folder`.
+///
+/// Returns the **resolved** path, which is what the caller must then use — re-deriving
+/// `folder.join(rel_path)` afterwards would throw away exactly the symlink resolution that makes
+/// this safe.
+fn resolve_in(folder: &str, rel_path: &str) -> Result<PathBuf, String> {
+    if !is_safe_relpath(rel_path) {
+        return Err(format!("invalid path: {rel_path}"));
+    }
+    contained_path(std::path::Path::new(folder), std::path::Path::new(rel_path))
+        .map_err(|e| escape_message(rel_path, &e))
+}
+
+/// The token handed back to the webview for a path [`resolve_in`] just proved contained.
+///
+/// **Resolve for the WRITE, re-anchor for the ANSWER.** `resolve_in` returns the CANONICAL path —
+/// symlinks followed — which is exactly what the filesystem call must use and exactly what the caller
+/// must not be handed back. `FsEntry::token` is *identity* in the frontend, and the frontend decides
+/// which opened root a token belongs to with a **string-prefix** test (`rootOfToken` in
+/// `src/shell/workspaceController.ts`, `isUnderRoot` in `src/host/tauri.ts`). A canonical path fails
+/// that test wherever the opened folder is reached through a link — macOS puts every temp-dir
+/// workspace behind `/var` -> `/private/var`, so `create_file` answers `/private/var/…` for a file
+/// `list_entries` calls `/var/…` — and on Windows it fails for EVERY call, because `canonicalize`
+/// returns the `\\?\` verbatim form no other token carries. A token that matches no root belongs to
+/// no workspace: explorer placement, dirty-tab tracking and session restore all mis-fire on it.
+///
+/// This is only ever reached once containment has already been decided, and it re-derives nothing
+/// that decision rested on: `rel` is the same relative path the primitive accepted, and the join is
+/// purely lexical. It is emphatically NOT the `folder.join(rel_path)` that `resolve_in` warns
+/// against — that one is used to WRITE, this one is only ever shown.
+///
+/// **Push components, don't `join` the path whole.** The webview sends a forward-slashed `rel_path`
+/// on every platform. `Path::join` appends it with the *native* separator but leaves the separators
+/// *inside* it exactly as they came, so on Windows `C:\ws` + `docs/a.koi` yields the mixed
+/// `C:\ws\docs/a.koi` — while `list_entries`, which mints its tokens by walking the filesystem,
+/// yields the all-backslash `C:\ws\docs\a.koi`. Two spellings of one file is precisely the identity
+/// break this helper exists to prevent, just one level further in. Walking `rel.components()` and
+/// pushing each one re-emits every separator natively. Only `Normal` components can appear here:
+/// `is_safe_relpath` has already refused an empty, absolute, `.` or `..` candidate.
+fn caller_token(folder: &str, rel: &std::path::Path) -> String {
+    let mut token = std::path::PathBuf::from(folder);
+    for component in rel.components() {
+        token.push(component);
+    }
+    token.to_string_lossy().into_owned()
+}
+
+/// Flatten a [`PathEscape`] into the `String` error these commands return.
+///
+/// It names WHICH rule the path broke, but echoes back only the caller's own relative path — never
+/// the absolute one the candidate resolved to. That resolved path lies *outside* the workspace by
+/// construction, and the webview has no business learning the host's filesystem layout from an
+/// error string. The `invalid path: {rel_path}` prefix is the shape these commands already
+/// returned, so existing callers keep matching on it.
+fn escape_message(rel_path: &str, escape: &PathEscape) -> String {
+    let why = match escape {
+        PathEscape::Traversal(_) => "escapes the workspace folder with `..`",
+        PathEscape::Absolute(_) => "must be relative to the workspace folder",
+        PathEscape::SymlinkEscape(_) => "resolves outside the workspace folder",
+        PathEscape::Malformed(_) => "is not a usable relative path",
+    };
+    format!("invalid path: {rel_path} ({why})")
 }
 
 /// A single entry name (for rename) is safe only if non-empty, separator-free, and not `.`/`..`.
@@ -1568,11 +1661,16 @@ fn list_entries(dir: String) -> Result<Vec<FsEntry>, String> {
 /// docs yet").
 #[tauri::command]
 fn list_dir(dir: String, rel_path: String) -> Result<Vec<FsEntry>, String> {
-    if !is_safe_relpath(&rel_path) {
-        return Err(format!("invalid path: {rel_path}"));
-    }
-    let root = std::path::Path::new(&dir);
-    let target = root.join(&rel_path);
+    let target = resolve_in(&dir, &rel_path)?;
+    // `target` is RESOLVED (symlinks followed), and every `rel_path`/skip decision below is made by
+    // stripping the root prefix off an entry — so the yardstick has to be the resolved root too, or
+    // the strip silently fails wherever the opened folder reaches through a symlink (macOS's
+    // `/tmp` -> `/private/tmp`, `/var` -> `/private/var`) and every returned `rel_path` degrades
+    // into a full absolute path. An empty candidate denotes the root itself, which is precisely how
+    // the primitive reports it.
+    let root = contained_path(std::path::Path::new(&dir), std::path::Path::new(""))
+        .map_err(|_| format!("failed to read directory {dir}"))?;
+    let root = root.as_path();
     let mut dirs: Vec<FsEntry> = Vec::new();
     let mut files: Vec<FsEntry> = Vec::new();
 
@@ -1590,12 +1688,14 @@ fn list_dir(dir: String, rel_path: String) -> Result<Vec<FsEntry>, String> {
             .and_then(|n| n.to_str())
             .unwrap_or_default()
             .to_string();
-        let rel = path
-            .strip_prefix(root)
-            .unwrap_or(&path)
-            .to_string_lossy()
-            .replace('\\', "/");
-        let token = path.to_string_lossy().into_owned();
+        let rel_os = path.strip_prefix(root).unwrap_or(&path);
+        let rel = rel_os.to_string_lossy().replace('\\', "/");
+        // The rel_path is computed against the RESOLVED root (see above) but the token is re-anchored
+        // on the caller's own `dir` string, because the frontend treats a token as identity and
+        // matches it against the opened root by string prefix — see `caller_token`. Built from the
+        // OS-native relative path rather than the forward-slashed `rel`, so a Windows token keeps the
+        // separators every other token in the tree uses.
+        let token = caller_token(&dir, rel_os);
         if file_type.is_dir() {
             dirs.push(FsEntry {
                 token,
@@ -1626,10 +1726,7 @@ fn list_dir(dir: String, rel_path: String) -> Result<Vec<FsEntry>, String> {
 /// return its absolute path. Errors if the file already exists.
 #[tauri::command]
 fn create_file(folder: String, rel_path: String, contents: String) -> Result<String, String> {
-    if !is_safe_relpath(&rel_path) {
-        return Err(format!("invalid path: {rel_path}"));
-    }
-    let target = std::path::Path::new(&folder).join(&rel_path);
+    let target = resolve_in(&folder, &rel_path)?;
     if target.exists() {
         return Err(format!("already exists: {}", target.display()));
     }
@@ -1639,20 +1736,17 @@ fn create_file(folder: String, rel_path: String, contents: String) -> Result<Str
     }
     std::fs::write(&target, contents)
         .map_err(|e| format!("failed to write {}: {e}", target.display()))?;
-    Ok(target.to_string_lossy().into_owned())
+    Ok(caller_token(&folder, std::path::Path::new(&rel_path)))
 }
 
 /// Create a (possibly nested) directory at `rel_path` under `folder` and return
 /// its absolute path.
 #[tauri::command]
 fn create_folder(folder: String, rel_path: String) -> Result<String, String> {
-    if !is_safe_relpath(&rel_path) {
-        return Err(format!("invalid path: {rel_path}"));
-    }
-    let target = std::path::Path::new(&folder).join(&rel_path);
+    let target = resolve_in(&folder, &rel_path)?;
     std::fs::create_dir_all(&target)
         .map_err(|e| format!("failed to create {}: {e}", target.display()))?;
-    Ok(target.to_string_lossy().into_owned())
+    Ok(caller_token(&folder, std::path::Path::new(&rel_path)))
 }
 
 /// Rename the entry at `token` (a file or directory) in place to `new_name` and
@@ -1717,11 +1811,8 @@ fn move_entry(
     new_rel_path: String,
     copy: bool,
 ) -> Result<String, String> {
-    if !is_safe_relpath(&new_rel_path) {
-        return Err(format!("invalid path: {new_rel_path}"));
-    }
+    let dest = resolve_in(&dest_folder, &new_rel_path)?;
     let src = std::path::Path::new(&token);
-    let dest = std::path::Path::new(&dest_folder).join(&new_rel_path);
     // Never clobber an existing destination — mirrors create_file/rename_entry and the browser
     // backend (fs::rename would silently overwrite a file / merge a dir, diverging from them).
     if dest.exists() {
@@ -1744,7 +1835,10 @@ fn move_entry(
         };
         removed.map_err(|e| format!("failed to remove source {token} after move: {e}"))?;
     }
-    Ok(dest.to_string_lossy().into_owned())
+    Ok(caller_token(
+        &dest_folder,
+        std::path::Path::new(&new_rel_path),
+    ))
 }
 
 /// Write raw bytes to `path`, replacing any existing file. Used to save a generated-project zip
@@ -3419,6 +3513,381 @@ mod tests {
         .is_err());
         // The escaping target was never created in the parent of the workspace.
         assert!(!root.parent().unwrap().join("escape.koi").exists());
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    // --- containment for the caller-supplied relative-path sinks (#1942) ------
+    //
+    // `is_safe_relpath` is purely LEXICAL: it rejects `..`, an absolute path and an empty name
+    // without ever touching the filesystem. That makes it necessary but NOT sufficient — a
+    // component that is a SYMLINK pointing out of the workspace is one perfectly ordinary
+    // `Normal` component, so it sails straight through the lexical screen and the `join` that
+    // follows lands outside the opened folder. That is exactly the shape of CVE-2026-27976 (a
+    // symlink inside a Zed extension archive turned into an arbitrary file write), and it is why
+    // all four of these sinks resolve through `crate::paths::contained_path` instead.
+    //
+    // The four tests below plant such a symlink and drive each sink through it; the positive
+    // counterparts prove this is containment, not symlink-phobia — a link that lands back INSIDE
+    // the workspace still works, and its resolved location is what gets used.
+    //
+    // Unix-gated because the setup needs `std::os::unix::fs::symlink`; the Windows CI leg still
+    // compiles (and runs) everything else in this module, including the lexical-screen test that
+    // follows them.
+
+    /// A workspace root plus a sibling directory that is OFF-LIMITS to it, both under `temp_dir()`
+    /// and removed on Drop.
+    ///
+    /// Layout:
+    /// ```text
+    /// <base>/root            the opened workspace folder
+    /// <base>/root/docs       an ordinary in-workspace directory
+    /// <base>/root/inner  ->  <base>/root/docs      a legitimate link that stays inside
+    /// <base>/root/link   ->  <base>/outside        the escape
+    /// <base>/outside         must never be read from or written to
+    /// ```
+    #[cfg(unix)]
+    struct EscapeFixture {
+        base: PathBuf,
+    }
+
+    #[cfg(unix)]
+    impl EscapeFixture {
+        fn new(tag: &str) -> Self {
+            static COUNTER: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+            let n = COUNTER.fetch_add(1, Ordering::SeqCst);
+            let base = std::env::temp_dir().join(format!(
+                "koine_escape_{tag}_{}_{}",
+                std::process::id(),
+                n
+            ));
+            let _ = std::fs::remove_dir_all(&base);
+            std::fs::create_dir_all(base.join("root").join("docs")).unwrap();
+            std::fs::create_dir_all(base.join("outside")).unwrap();
+            let f = EscapeFixture { base };
+            std::os::unix::fs::symlink(f.outside(), f.root().join("link")).unwrap();
+            std::os::unix::fs::symlink(f.root().join("docs"), f.root().join("inner")).unwrap();
+            f
+        }
+
+        fn root(&self) -> PathBuf {
+            self.base.join("root")
+        }
+
+        fn outside(&self) -> PathBuf {
+            self.base.join("outside")
+        }
+
+        /// The opened workspace as the `String` these commands take.
+        fn folder(&self) -> String {
+            self.root().to_string_lossy().into_owned()
+        }
+    }
+
+    #[cfg(unix)]
+    impl Drop for EscapeFixture {
+        fn drop(&mut self) {
+            // `remove_dir_all` unlinks symlinks rather than following them, so tearing the fixture
+            // down cannot delete whatever `link` points at.
+            let _ = std::fs::remove_dir_all(&self.base);
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn list_dir_refuses_a_symlink_that_leaves_the_workspace() {
+        let f = EscapeFixture::new("listdir");
+        std::fs::write(f.outside().join("secret.md"), "s3cret").unwrap();
+        std::fs::write(f.root().join("docs").join("note.md"), "note").unwrap();
+
+        // The escape: `link` is one ordinary component to a lexical check, but it resolves outside.
+        // (Matched rather than `unwrap_err`-ed: `FsEntry` is a serialization type with no `Debug`,
+        // and naming what leaked makes a failure here read as the security regression it is.)
+        let err = match list_dir(f.folder(), "link".to_string()) {
+            Ok(entries) => panic!(
+                "listing `link` escaped the workspace and returned {:?}",
+                entries.iter().map(|e| e.name.as_str()).collect::<Vec<_>>()
+            ),
+            Err(e) => e,
+        };
+        assert!(err.contains("invalid path: link"), "got: {err}");
+        // Nothing from outside the workspace may appear in ANY listing of it.
+        for rel in ["", "docs", "inner"] {
+            if let Ok(entries) = list_dir(f.folder(), rel.to_string()) {
+                assert!(
+                    !entries.iter().any(|e| e.name == "secret.md"),
+                    "an outside entry leaked into the listing of {rel:?}"
+                );
+            }
+        }
+
+        // Containment, not symlink-phobia: a link that lands back INSIDE still lists, and its
+        // entries are reported at their resolved, in-workspace rel_path.
+        let entries = list_dir(f.folder(), "inner".to_string()).unwrap();
+        assert_eq!(
+            entries.iter().map(|e| e.name.as_str()).collect::<Vec<_>>(),
+            vec!["note.md"]
+        );
+        assert_eq!(entries[0].rel_path, "docs/note.md");
+
+        // ...and an ordinary relative path is unaffected.
+        let entries = list_dir(f.folder(), "docs".to_string()).unwrap();
+        assert_eq!(entries[0].rel_path, "docs/note.md");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn create_file_refuses_a_symlink_that_leaves_the_workspace() {
+        let f = EscapeFixture::new("createfile");
+
+        let err =
+            create_file(f.folder(), "link/pwned.koi".to_string(), "boom".to_string()).unwrap_err();
+        assert!(err.contains("invalid path: link/pwned.koi"), "got: {err}");
+        // The write did not happen THROUGH the link either.
+        assert!(!f.outside().join("pwned.koi").exists());
+
+        // The in-workspace link still works, and the returned token is the resolved location.
+        let token = create_file(
+            f.folder(),
+            "inner/ok.koi".to_string(),
+            "context Ok {}".to_string(),
+        )
+        .unwrap();
+        assert!(f.root().join("docs").join("ok.koi").is_file());
+        assert!(std::path::Path::new(&token).is_absolute());
+        assert_eq!(std::fs::read_to_string(&token).unwrap(), "context Ok {}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn create_folder_refuses_a_symlink_that_leaves_the_workspace() {
+        let f = EscapeFixture::new("createfolder");
+
+        let err = create_folder(f.folder(), "link/pwned".to_string()).unwrap_err();
+        assert!(err.contains("invalid path: link/pwned"), "got: {err}");
+        assert!(!f.outside().join("pwned").exists());
+
+        // The in-workspace link still works.
+        let token = create_folder(f.folder(), "inner/nested".to_string()).unwrap();
+        assert!(f.root().join("docs").join("nested").is_dir());
+        assert!(std::path::Path::new(&token).is_dir());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn move_entry_refuses_a_symlink_that_leaves_the_workspace() {
+        let f = EscapeFixture::new("move");
+        let src = f.root().join("a.koi");
+        std::fs::write(&src, "context A {}").unwrap();
+
+        let err = move_entry(
+            src.to_string_lossy().into_owned(),
+            f.folder(),
+            "link/pwned.koi".to_string(),
+            true,
+        )
+        .unwrap_err();
+        assert!(err.contains("invalid path: link/pwned.koi"), "got: {err}");
+        assert!(!f.outside().join("pwned.koi").exists());
+        assert!(src.exists(), "the rejected move must not touch the source");
+
+        // The in-workspace link still works.
+        let dest = move_entry(
+            src.to_string_lossy().into_owned(),
+            f.folder(),
+            "inner/moved.koi".to_string(),
+            false,
+        )
+        .unwrap();
+        assert!(f.root().join("docs").join("moved.koi").is_file());
+        assert_eq!(std::fs::read_to_string(&dest).unwrap(), "context A {}");
+        assert!(!src.exists());
+    }
+
+    /// Every token in an `FsEntry` tree, depth-first.
+    fn all_tokens(entries: &[FsEntry], into: &mut Vec<String>) {
+        for entry in entries {
+            into.push(entry.token.clone());
+            if let Some(children) = &entry.children {
+                all_tokens(children, into);
+            }
+        }
+    }
+
+    /// A token must be spelled with the platform's own separator throughout.
+    ///
+    /// The webview sends `rel_path` forward-slashed on every platform. `Path::join`ing it whole
+    /// leaves those inner slashes alone, so on Windows the answer came back as the mixed
+    /// `C:\ws\docs/a.koi` while `list_entries` — which walks the filesystem — minted
+    /// `C:\ws\docs\a.koi`. Two spellings of one file breaks token identity in the frontend just as
+    /// surely as the canonical-path regression did. The round-trip assertion in the test below
+    /// catches it too, but only on Windows and only by way of a listing; this one names the
+    /// invariant directly so the next failure reads as "wrong separator" rather than "not found".
+    #[test]
+    fn a_caller_token_is_spelled_with_the_native_separator_throughout() {
+        let token = caller_token("root", std::path::Path::new("docs/nested/a.koi"));
+
+        let foreign = if std::path::MAIN_SEPARATOR == '/' {
+            '\\'
+        } else {
+            '/'
+        };
+        assert!(
+            !token.contains(foreign),
+            "caller_token answered {token}, which mixes in a non-native {foreign:?} separator"
+        );
+        assert_eq!(
+            std::path::Path::new(&token)
+                .components()
+                .collect::<Vec<_>>()
+                .len(),
+            4,
+            "caller_token answered {token}, which is not root + the three relative components"
+        );
+    }
+
+    #[test]
+    fn the_retrofitted_sinks_return_a_token_anchored_on_the_callers_own_folder() {
+        // `resolve_in` hands back the CANONICAL path, and returning that to the webview was a
+        // regression this containment work introduced. `FsEntry::token` is identity in the frontend,
+        // and the frontend decides a token's owning root with a string-PREFIX test (`rootOfToken` in
+        // `src/shell/workspaceController.ts`, `isUnderRoot` in `src/host/tauri.ts`). So a newly
+        // created file answered `/private/var/…` while every listing of the same workspace answered
+        // `/var/…` — the same file under two names, belonging to no root, breaking explorer
+        // placement, dirty-tab tracking and session restore. On Windows it would have been every call:
+        // `canonicalize` returns the `\\?\` verbatim form that no other token carries.
+        //
+        // The workspace is opened THROUGH A SYMLINK on unix so the canonical form is guaranteed to
+        // differ on every unix rather than only on macOS, where /var -> /private/var makes it so for
+        // free. On Windows the plain path suffices: the verbatim prefix is unconditional.
+        static COUNTER: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+        let base = std::env::temp_dir().join(format!(
+            "koine_token_{}_{}",
+            std::process::id(),
+            COUNTER.fetch_add(1, Ordering::SeqCst)
+        ));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(base.join("real")).unwrap();
+
+        #[cfg(unix)]
+        let opened = {
+            std::os::unix::fs::symlink(base.join("real"), base.join("link")).unwrap();
+            base.join("link")
+        };
+        #[cfg(not(unix))]
+        let opened = base.join("real");
+
+        let folder = opened.to_string_lossy().into_owned();
+
+        let created = create_file(
+            folder.clone(),
+            "docs/a.koi".to_string(),
+            "context A {}".to_string(),
+        )
+        .unwrap();
+        assert!(
+            created.starts_with(&folder),
+            "create_file answered {created}, which is not under the folder the caller passed ({folder}) \
+             — the frontend matches a token to its root by string prefix, so this file belongs to no \
+             workspace"
+        );
+
+        let made = create_folder(folder.clone(), "docs/nested".to_string()).unwrap();
+        assert!(
+            made.starts_with(&folder),
+            "create_folder answered {made}, not under {folder}"
+        );
+
+        // The round trip, which is the property that actually matters: the token a LISTING mints for
+        // a file must be the very token the command that created it handed back.
+        let mut tokens = Vec::new();
+        all_tokens(&list_entries(folder.clone()).unwrap(), &mut tokens);
+        assert!(
+            tokens.contains(&created),
+            "list_entries minted {tokens:?}, none of which is create_file's {created}"
+        );
+        assert!(
+            tokens.contains(&made),
+            "list_entries minted {tokens:?}, none of which is create_folder's {made}"
+        );
+
+        let moved = move_entry(
+            created.clone(),
+            folder.clone(),
+            "docs/b.koi".to_string(),
+            false,
+        )
+        .unwrap();
+        assert!(
+            moved.starts_with(&folder),
+            "move_entry answered {moved}, not under {folder}"
+        );
+
+        let listing = list_dir(folder.clone(), "docs".to_string()).unwrap();
+        assert!(
+            listing.iter().any(|e| e.token == moved),
+            "list_dir minted {:?}, none of which is move_entry's {moved}",
+            listing.iter().map(|e| e.token.as_str()).collect::<Vec<_>>()
+        );
+        // ...and the rel_path stays anchored on the workspace root, which is what the resolved-root
+        // strip above buys and what a naive "re-anchor everything" fix would have thrown away.
+        assert!(
+            listing.iter().any(|e| e.rel_path == "docs/b.koi"),
+            "list_dir reported {:?}, not the workspace-relative docs/b.koi",
+            listing
+                .iter()
+                .map(|e| e.rel_path.as_str())
+                .collect::<Vec<_>>()
+        );
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn sinks_refuse_an_empty_or_absolute_rel_path() {
+        // The lexical pre-filter earns its keep on cases the containment primitive itself
+        // deliberately ACCEPTS. An empty (or `.`) candidate denotes the root — a fine answer to
+        // "is it inside", a terrible one for "create this entry": `create_folder` would silently
+        // succeed on the workspace root and `move_entry` would target it. An interior `..` is
+        // likewise normalized away by the primitive (`docs/../adr` means `adr`), but a sink that
+        // takes a name from the UI has no business accepting a path that does not mean what it
+        // reads like. Both are refused before anything touches the disk.
+        //
+        // (`docs/./adr` is NOT in this list: Rust's `Components` normalizes an interior `.` away
+        // entirely, so it is indistinguishable from `docs/adr` by the time either check sees it.)
+        let root = std::env::temp_dir().join(format!("koine_lexical_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let folder = root.to_string_lossy().into_owned();
+        let src = root.join("a.koi");
+        std::fs::write(&src, "x").unwrap();
+
+        for rel in ["", ".", "/etc/koine-pwned", "docs/../adr"] {
+            assert!(
+                list_dir(folder.clone(), rel.to_string()).is_err(),
+                "list_dir accepted {rel:?}"
+            );
+            assert!(
+                create_file(folder.clone(), rel.to_string(), "x".into()).is_err(),
+                "create_file accepted {rel:?}"
+            );
+            assert!(
+                create_folder(folder.clone(), rel.to_string()).is_err(),
+                "create_folder accepted {rel:?}"
+            );
+            assert!(
+                move_entry(
+                    src.to_string_lossy().into_owned(),
+                    folder.clone(),
+                    rel.to_string(),
+                    true
+                )
+                .is_err(),
+                "move_entry accepted {rel:?}"
+            );
+        }
+        // The source survived every rejected move.
+        assert_eq!(std::fs::read_to_string(&src).unwrap(), "x");
 
         let _ = std::fs::remove_dir_all(&root);
     }
