@@ -303,17 +303,24 @@ internal static class CqrsValidator
     /// <c>add</c>, and only top-level queries), so a collision this reports is always real for at least
     /// one HTTP target.</para>
     ///
-    /// <para>Routes are compared <b>ordinally</b> — exactly the criterion that makes an OpenAPI mapping key
-    /// a duplicate. Two templates that differ only in letter case, or only in the <i>name</i> of a route
-    /// parameter (<c>/orders/{id}</c> vs <c>/orders/{orderId}</c>), are distinct YAML keys and so are not
-    /// reported here, even though ASP.NET would still consider them ambiguous.</para>
+    /// <para>Routes are compared on their <see cref="NormalizeRoute"/> KEY (#1745), not the raw string —
+    /// exactly what ASP.NET's router matches on: literal text case-insensitively, and a route parameter by
+    /// its position rather than its name or constraint. So <c>/Orders</c> collides with <c>/orders</c>, and
+    /// <c>/orders/{id}</c> collides with <c>/orders/{orderId}</c>, even though neither pair is ordinally
+    /// equal (and so would key two distinct, and so individually valid, OpenAPI path items — this check
+    /// deliberately over-reports relative to that narrower "would the YAML document parse" criterion,
+    /// because ASP.NET's ambiguity is the one that actually breaks a request). What still falls outside
+    /// this check's scope: two templates whose *precedence* would let ASP.NET disambiguate them despite an
+    /// overlapping match space (e.g. a literal segment vs a parameter at the same position) — routing
+    /// precedence is not a per-declaration property this analysis reasons about.</para>
     /// </summary>
     public static void ValidateApiRoutes(ContextNode ctx, List<Diagnostic> diagnostics)
     {
-        // First-wins: the value is how the declaration that claimed the (route, verb) pair reads in a
-        // message, plus whether IT was a factory too — the hint below needs both sides' shape, not just
-        // the reported claimant's.
-        var claimed = new Dictionary<(string Route, string Verb), (string Subject, bool ConventionalOnly)>();
+        // First-wins, keyed on the NORMALIZED route (#1745): the value carries the RAW route (so a
+        // colliding pair's message can show both spellings when they textually differ) and whether the
+        // claimant was a factory relying purely on convention — the hint below needs both sides' shape,
+        // not just the reported claimant's.
+        var claimed = new Dictionary<(string Route, string Verb), (string Subject, string RawRoute, bool ConventionalOnly)>();
 
         foreach (EntityDecl entity in ctx.AllEntities())
         {
@@ -350,7 +357,11 @@ internal static class CqrsValidator
 
         void Claim(string route, string verb, string subject, SourceSpan span, bool conventionalOnly = false)
         {
-            if (claimed.TryGetValue((route, verb), out var first))
+            // `verb` is already an uppercase literal by the time it reaches here — either the "POST"/"GET"
+            // convention default above, or `KoineModelBuilderVisitor.ReadApiAnnotations` uppercasing an
+            // `@get`/`@put`/… annotation's own name — so the key needs no verb normalization of its own.
+            var key = (NormalizeRoute(route), verb);
+            if (claimed.TryGetValue(key, out var first))
             {
                 // `conventionalOnly` says "this factory derives BOTH its route and its verb by convention"
                 // — since #1846 gave factories an annotation axis of their own it no longer means "can
@@ -373,14 +384,21 @@ internal static class CqrsValidator
                                       "@route or a verb annotation of its own to move it off this path",
                     _ => "",
                 };
-                diagnostics.Add(Diagnostic.Error(DiagnosticCodes.DuplicateApiRoute,
-                    $"{subject} maps '{verb} {route}', which {first.Subject} already maps; two declarations may " +
-                    "share a route only when their verbs differ" + hint,
-                    span));
+
+                // Raw routes identical (the pre-#1745 case) keeps the original wording verbatim; raw routes
+                // differing only by normalization (case-only or parameter-name-only) names BOTH spellings —
+                // otherwise the report reads as a false positive to whichever author's spelling is unquoted.
+                var message = route == first.RawRoute
+                    ? $"{subject} maps '{verb} {route}', which {first.Subject} already maps; two declarations may " +
+                      "share a route only when their verbs differ" + hint
+                    : $"{subject} maps '{verb} {route}', which {first.Subject} already maps as '{verb} {first.RawRoute}' " +
+                      "(routes that differ only in parameter names or letter case match the same URLs)";
+
+                diagnostics.Add(Diagnostic.Error(DiagnosticCodes.DuplicateApiRoute, message, span));
                 return;
             }
 
-            claimed[(route, verb)] = (subject, conventionalOnly);
+            claimed[key] = (subject, route, conventionalOnly);
         }
     }
 

@@ -1922,4 +1922,85 @@ public class R19ApiAnnotationsTests
     [InlineData("/orders/{id", "/orders/{id")]
     public void Normalize_route_rewrites_case_and_route_parameters(string route, string expected) =>
         CqrsValidator.NormalizeRoute(route).ShouldBe(expected);
+
+    /// <summary>
+    /// #1745 (a): the issue's headline gap — two commands whose routes differ only in a route
+    /// parameter's NAME (<c>{id}</c> vs <c>{orderId}</c>) reach the same ASP.NET route table entry,
+    /// even though the raw templates were never ordinally equal. Filtered to KOI1211 specifically: a
+    /// route token named <c>orderId</c> binds to nothing on a parameterless command (KOI1215, an
+    /// unrelated pre-existing warning also present in the issue's own repro model), which is not what
+    /// this test is about.
+    /// </summary>
+    [Fact]
+    public void Commands_whose_routes_differ_only_in_parameter_name_are_rejected() =>
+        Diagnose(TwoCommandSource(PutOrdersId, ["""@route("/orders/{orderId}")""", "@put"]))
+            .Where(d => d.Code == DiagnosticCodes.DuplicateApiRoute)
+            .ShouldHaveSingleItem();
+
+    /// <summary>
+    /// #1745 (b): the issue's other headline gap — two queries whose routes differ only in letter
+    /// case (<c>/Orders</c> vs <c>/orders</c>) are the same URL space to ASP.NET's case-insensitive
+    /// router.
+    /// </summary>
+    [Fact]
+    public void Queries_whose_routes_differ_only_in_case_are_rejected()
+    {
+        var source = """
+            context Sales {
+              enum OrderStatus { Draft, Placed }
+              aggregate Fulfilment root Order {
+                entity Order identified by OrderId {
+                  status: OrderStatus = Draft
+                }
+              }
+
+              readmodel OrderRow from Order { status }
+
+              @route("/Orders")
+              query AllOrders(): List<OrderRow>
+
+              @route("/orders")
+              query RecentOrders(): List<OrderRow>
+            }
+            """;
+
+        Diagnose(source).ShouldHaveSingleItem().Code.ShouldBe(DiagnosticCodes.DuplicateApiRoute);
+    }
+
+    /// <summary>
+    /// #1745 (c): when the raw routes textually differ, the message names BOTH spellings — otherwise
+    /// it would read as a false positive to whichever author's spelling goes unquoted.
+    /// </summary>
+    [Fact]
+    public void The_collision_message_names_both_spellings_when_the_routes_differ()
+    {
+        Diagnostic collision = Diagnose(TwoCommandSource(PutOrdersId, ["""@route("/orders/{orderId}")""", "@put"]))
+            .Single(d => d.Code == DiagnosticCodes.DuplicateApiRoute);
+
+        collision.Message.ShouldContain("PUT /orders/{orderId}");
+        collision.Message.ShouldContain("PUT /orders/{id}");
+        collision.Message.ShouldContain("routes that differ only in parameter names or letter case match the same URLs");
+    }
+
+    /// <summary>
+    /// #1745 (e): near misses that remain genuinely different stay clean — a catch-all is not the same
+    /// match space as a plain segment, an optional token is not the same as a required one, and an
+    /// extra literal segment is a real difference. (The catch-all pair's token names bind to nothing on
+    /// a parameterless command, so it is checked for the absence of KOI1211 specifically rather than an
+    /// empty diagnostic list, which the unrelated KOI1215 "unbound route token" warning would fail.)
+    /// </summary>
+    [Fact]
+    public void Near_miss_routes_that_are_genuinely_different_stay_clean()
+    {
+        Diagnose(TwoCommandSource(
+                ["""@route("/orders/{*path}")""", "@put"],
+                ["""@route("/orders/{name}")""", "@put"]))
+            .ShouldNotContain(d => d.Code == DiagnosticCodes.DuplicateApiRoute);
+
+        Diagnose(TwoCommandSource(["""@route("/orders/{id?}")""", "@put"], PutOrdersId))
+            .ShouldBeEmpty();
+
+        Diagnose(TwoCommandSource(["""@route("/orders/{id}/edit")""", "@put"], PutOrdersId))
+            .ShouldBeEmpty();
+    }
 }
