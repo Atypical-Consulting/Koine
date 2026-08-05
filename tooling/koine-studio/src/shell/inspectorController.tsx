@@ -31,6 +31,7 @@ import type {
   GlossaryModel,
   ModelNode,
   DocumentSymbol,
+  Range,
   SetDocResult,
   SourceSpan,
   StructuredEdit,
@@ -53,7 +54,7 @@ import type { SelectedElement } from '@/model/selection';
 import { type ModelOutlineHandlers } from '@/model/modelOutline';
 import { mountDomainNavigator, type DomainNavigatorHandle, type TacticalHandlers } from '@/model/domainNavigator';
 import { type InspectorElement, type InspectorHandlers } from '@/model/inspector';
-import { buildModelIndex, lookupElement, resolveInspectableQn, type ModelElement, type ModelIndex } from '@/model/modelIndex';
+import { buildModelIndex, lookupElement, resolveInspectableQn, type ModelIndex } from '@/model/modelIndex';
 import { PropertiesPanel } from '@/model/PropertiesPanel';
 import type { SourceControlFocus } from '@/model/SourceControlPanel';
 import { SyntaxTreePanel } from '@/model/SyntaxTreePanel';
@@ -305,21 +306,22 @@ export interface InspectorController {
 }
 
 /**
- * A tactical row's best jump-to-declaration span (#1737): the element's own diagram-node span when it
- * names a file — the multi-file-correct choice — else a span built from the glossary NAME range on the
- * ACTIVE document (`nameRange.start`/`end`, +1 to 1-based), mirroring `loadHistory`'s "prefer the
- * element's own span, else the active file + name range" rule below (`inspectorHandlers.loadHistory`)
- * so the two can't drift. Always returns a span (never `null`) since a glossary entry always carries a
- * `nameRange` — `ModelOutlineHandlers.goto` stays the fallback for callers with no resolvable element at
- * all (e.g. the Context Map's dangling relation endpoints).
+ * The best jump-to-declaration span (#1737) for an element that may or may not carry its own
+ * `SourceSpan` (e.g. an undrawn value object never gets a diagram node): prefers `span` when it names
+ * a file — the multi-file-correct choice — else builds a span from `nameRange` on the ACTIVE document
+ * (`nameRange.start`/`end`, +1 to 1-based). Shared by `loadHistory` and `tacticalHandlers.goto` below
+ * (each own a different element shape, so this takes the two raw ingredients rather than an element),
+ * so the two rules can't drift apart. Always returns a span with a file (never `null`) since a
+ * glossary entry always carries a `nameRange` — `ModelOutlineHandlers.goto` stays the fallback for
+ * callers with no resolvable element at all (e.g. the Context Map's dangling relation endpoints).
  */
 function bestJumpSpan(
-  element: ModelElement,
+  span: SourceSpan | null | undefined,
+  nameRange: Range,
   activeUri: string,
 ): Pick<SourceSpan, 'file' | 'line' | 'column' | 'endLine' | 'endColumn'> {
-  const span = element.node?.sourceSpan;
   if (span?.file) return span;
-  const { start, end } = element.entry.nameRange;
+  const { start, end } = nameRange;
   return {
     file: activeUri,
     line: start.line + 1,
@@ -763,7 +765,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
       const qn = resolveInspectableQn(modelIndex, node.qualifiedName);
       const element = qn ? lookupElement(modelIndex, qn)?.element : undefined;
       if (!element) return;
-      modelOutlineHandlers.gotoSourceSpan(bestJumpSpan(element, deps.activeUri()));
+      modelOutlineHandlers.gotoSourceSpan(bestJumpSpan(element.node?.sourceSpan, element.entry.nameRange, deps.activeUri()));
     },
     reveal: (node) => deps.revealInFiles(nodeContext(node)),
     setAxis: (axis) => centerDeck.setAxis(axis),
@@ -796,16 +798,15 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
       // Prefer the element's own source span — its correct file AND full line range — so history is
       // scoped to the right declaration even when it lives in a file other than the active editor (a
       // multi-file workspace). Fall back to the active file + name range for elements with no diagram
-      // node / span (e.g. an undrawn value object).
-      const span = element.sourceSpan;
-      const useSpan = span != null && span.file != null;
-      const path = fileUriToPath(useSpan ? span.file! : deps.activeUri());
+      // node / span (e.g. an undrawn value object) — bestJumpSpan (above) owns this same rule, shared
+      // with tacticalHandlers.goto so the two can't drift.
+      const span = bestJumpSpan(element.sourceSpan, element.nameRange, deps.activeUri());
+      const path = fileUriToPath(span.file!); // bestJumpSpan always resolves a file (element's own, or active)
       if (!path) return Promise.resolve(null);
-      // git `-L` is 1-based inclusive. A SourceSpan is 1-based with an end-EXCLUSIVE endLine (so the last
-      // content line is endLine - 1); the name range is 0-based LSP positions, so shift those by one.
-      const startLine = useSpan ? span.line : element.nameRange.start.line + 1;
-      const endLine = useSpan ? Math.max(span.line, span.endLine - 1) : element.nameRange.end.line + 1;
-      return deps.platform.gitLogForRange(path, startLine, endLine);
+      // git `-L` is 1-based inclusive; a SourceSpan's endLine is end-EXCLUSIVE, so the last content line
+      // is endLine - 1.
+      const endLine = Math.max(span.line, span.endLine - 1);
+      return deps.platform.gitLogForRange(path, span.line, endLine);
     },
   };
 

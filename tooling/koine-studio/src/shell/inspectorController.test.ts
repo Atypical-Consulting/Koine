@@ -1128,6 +1128,52 @@ describe('createInspectorController — tactical rows jump to their declaring fi
     expect(deps.gotoSourceSpan).toHaveBeenCalledWith(span);
     expect(deps.editor.goto).not.toHaveBeenCalled();
   });
+
+  // Code-review follow-up (#1737): loadHistory (Properties-panel git history) now shares its "prefer
+  // the element's own span, else the active document + name range" resolution with tacticalHandlers.goto
+  // above, via the same bestJumpSpan helper — this pins loadHistory's own git-log range math still holds.
+  test("loadHistory uses the element's own diagram-node span (file + 1-based inclusive line range) when it has one", async () => {
+    const lsp = makeLsp();
+    lsp.model = vi.fn(async () => billingModel());
+    const span: SourceSpan = { file: 'file:///billing.koi', line: 5, column: 3, endLine: 8, endColumn: 1, offset: 40, length: 5 };
+    const moneyNode: DiagramNode = {
+      id: 'Billing.Money', label: 'Money', kind: 'value-object', qualifiedName: 'Billing.Money',
+      sourceSpan: span, stereotype: null, members: [],
+    };
+    lsp.livingDocs = vi.fn(async (): Promise<DocsResult> => ({
+      files: [{ path: 'billing.koi', contents: '', diagrams: [{ caption: 'Invoice', kind: 'aggregate', mermaid: '', graph: { nodes: [moneyNode], edges: [] } }] }],
+    }));
+    const gitLogForRange = vi.fn(async () => null);
+    const deps = makeDeps(lsp, { platform: fakePlatform({ gitLogForRange }) });
+    const ctl = createInspectorController(deps);
+    ctl.init();
+    ctl.refreshActiveSurfaces();
+    await flush();
+
+    ctl.selection.set({ qualifiedName: 'Billing.Money', context: 'Billing' });
+    await flush();
+
+    // span.endLine (8) is end-EXCLUSIVE, so git -L's inclusive end is endLine - 1 = 7.
+    expect(gitLogForRange).toHaveBeenCalledWith('/billing.koi', 5, 7);
+  });
+
+  test('loadHistory falls back to the active document + glossary name range when the element has no diagram-node span', async () => {
+    const lsp = makeLsp(); // default lsp.livingDocs() => { files: [] }: Money has no diagram node
+    lsp.model = vi.fn(async () => billingModel());
+    const gitLogForRange = vi.fn(async () => null);
+    const deps = makeDeps(lsp, { platform: fakePlatform({ gitLogForRange }) }); // activeUri() => 'file:///work/model.koi'
+    const ctl = createInspectorController(deps);
+    ctl.init();
+    ctl.refreshActiveSurfaces();
+    await flush();
+
+    ctl.selection.set({ qualifiedName: 'Billing.Money', context: 'Billing' });
+    await flush();
+
+    // glossaryFixture's Billing.Money nameRange is 0-based { start: {line:1,...}, end: {line:1,...} } —
+    // today's exact fallback behaviour: both bounds are nameRange.line + 1, on the active document.
+    expect(gitLogForRange).toHaveBeenCalledWith('/work/model.koi', 2, 2);
+  });
 });
 
 describe('createInspectorController — loading states clear on success', () => {
