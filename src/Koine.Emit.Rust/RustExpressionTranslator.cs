@@ -290,6 +290,38 @@ internal sealed class RustExpressionTranslator
     {
         TypeRef? leftType = InferRenderedType(co.Left);
         TypeRef? rightType = InferRenderedType(co.Right);
+
+        // Issue #1946: a non-optional left operand can never trigger `??`'s fallback — `.or_else`/
+        // `.unwrap_or_else` don't even exist on a bare (non-Option) value, so calling them unconditionally
+        // is a real rustc E0599. The right operand is provably dead (mirrors PHP's #1935 fix for the
+        // identical defect family): collapse to just the left, reconciled against the right's type via the
+        // same BranchReconciliation.Classify decision WriteReconciledBranch's ternary path uses — widen
+        // inside (Decimal::from(...)), Some-wrap outside (Some(...)). NeedsOptionalWiden structurally never
+        // applies here: it requires the branch itself to be optional, and this arm only runs when leftType
+        // is non-optional.
+        if (leftType?.IsOptional == false)
+        {
+            BranchReconciliation collapseNeeds = BranchReconciliation.Classify(leftType, rightType);
+            if (collapseNeeds.NeedsSomeWrap)
+            {
+                sb.Append("Some(");
+            }
+            if (collapseNeeds.NeedsWiden)
+            {
+                sb.Append("Decimal::from(");
+            }
+            WriteOperandValue(co.Left, sb);
+            if (collapseNeeds.NeedsWiden)
+            {
+                sb.Append(')');
+            }
+            if (collapseNeeds.NeedsSomeWrap)
+            {
+                sb.Append(')');
+            }
+            return;
+        }
+
         BranchReconciliation leftNeeds = BranchReconciliation.Classify(leftType, rightType);
         BranchReconciliation rightNeeds = BranchReconciliation.Classify(rightType, leftType);
 
@@ -330,7 +362,7 @@ internal sealed class RustExpressionTranslator
     /// <c>Decimal?</c> once its own operands are reconciled). Recursive for exactly that reason — a
     /// nested coalesce's own effective type is the join of ITS operands, not its leftmost leaf's.
     /// </summary>
-    private TypeRef? InferRenderedType(Expr value)
+    internal TypeRef? InferRenderedType(Expr value)
     {
         if (value is not CoalesceExpr co)
         {
