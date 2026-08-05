@@ -271,25 +271,64 @@ internal sealed class RustExpressionTranslator
     }
 
     /// <summary>
-    /// Issue #1829: renders <c>l ?? r</c> with each operand numerically reconciled against the OTHER'S
-    /// type, mirroring Kotlin's <c>WriteCoalesce</c> (#1615), Java's <c>Optional.or</c>/<c>.orElse</c>
-    /// widening (#1548), and TypeScript's/Python's/PHP's #1762 — the one target this reconciliation
-    /// family had never reached. <c>l</c> is always <c>Option</c>-shaped (that is what makes <c>??</c>
-    /// meaningful), so its widen composes as an <c>Option::map</c> ahead of the combinator call
-    /// (<c>NeedsWiden</c> structurally never applies to the left operand — only
+    /// Renders <c>l ?? r</c>. Issue #1946: <c>l</c> is NOT always <c>Option</c>-shaped — Koine legally
+    /// allows a non-optional-declared left operand coalesced against an optional fallback — so this
+    /// first checks <c>leftType?.IsOptional == false</c> and, if so, collapses to just the (reconciled)
+    /// left operand instead of calling <c>.or_else</c>/<c>.unwrap_or_else</c> on a value that doesn't
+    /// have them (see the collapse branch below for the rationale).
+    /// <para>
+    /// Issue #1829: everything below the collapse branch is the pre-existing path, for when <c>l</c> IS
+    /// <c>Option</c>-shaped (the only case <c>??</c> historically had to handle). It renders each operand
+    /// numerically reconciled against the OTHER'S type, mirroring Kotlin's <c>WriteCoalesce</c> (#1615),
+    /// Java's <c>Optional.or</c>/<c>.orElse</c> widening (#1548), and TypeScript's/Python's/PHP's #1762.
+    /// Because <c>l</c> is optional on this path, its widen composes as an <c>Option::map</c> ahead of
+    /// the combinator call (<c>NeedsWiden</c> structurally never applies to the left operand here — only
     /// <see cref="BranchReconciliation.NeedsOptionalWiden"/> can, since <c>l</c>'s own inferred type is
-    /// always optional). The combinator choice itself is unchanged from #1333:
+    /// optional). The combinator choice itself is unchanged from #1333:
     /// <c>.unwrap_or_else(...)</c> (closure returns a bare value) when the right operand is non-optional,
     /// <c>.or_else(...)</c> (closure returns <c>Option&lt;T&gt;</c>) when it is itself optional — the
     /// right operand's OWN widen composes inside whichever closure shape that picks: a bare
     /// <c>Decimal::from(...)</c> wrap for <c>NeedsWiden</c>, or a <c>.map(Decimal::from)</c> for
     /// <c>NeedsOptionalWiden</c> (so a still-<c>None</c> optional fallback stays <c>None</c> rather than
     /// widening a value that isn't there).
+    /// </para>
     /// </summary>
     private void WriteCoalesce(CoalesceExpr co, StringBuilder sb)
     {
         TypeRef? leftType = InferRenderedType(co.Left);
         TypeRef? rightType = InferRenderedType(co.Right);
+
+        // Issue #1946: a non-optional left operand can never trigger `??`'s fallback — `.or_else`/
+        // `.unwrap_or_else` don't even exist on a bare (non-Option) value, so calling them unconditionally
+        // is a real rustc E0599. The right operand is provably dead (mirrors PHP's #1935 fix for the
+        // identical defect family): collapse to just the left, reconciled against the right's type via the
+        // same BranchReconciliation.Classify decision WriteReconciledBranch's ternary path uses — widen
+        // inside (Decimal::from(...)), Some-wrap outside (Some(...)). NeedsOptionalWiden structurally never
+        // applies here: it requires the branch itself to be optional, and this arm only runs when leftType
+        // is non-optional.
+        if (leftType?.IsOptional == false)
+        {
+            BranchReconciliation collapseNeeds = BranchReconciliation.Classify(leftType, rightType);
+            if (collapseNeeds.NeedsSomeWrap)
+            {
+                sb.Append("Some(");
+            }
+            if (collapseNeeds.NeedsWiden)
+            {
+                sb.Append("Decimal::from(");
+            }
+            WriteOperandValue(co.Left, sb);
+            if (collapseNeeds.NeedsWiden)
+            {
+                sb.Append(')');
+            }
+            if (collapseNeeds.NeedsSomeWrap)
+            {
+                sb.Append(')');
+            }
+            return;
+        }
+
         BranchReconciliation leftNeeds = BranchReconciliation.Classify(leftType, rightType);
         BranchReconciliation rightNeeds = BranchReconciliation.Classify(rightType, leftType);
 
@@ -330,7 +369,7 @@ internal sealed class RustExpressionTranslator
     /// <c>Decimal?</c> once its own operands are reconciled). Recursive for exactly that reason — a
     /// nested coalesce's own effective type is the join of ITS operands, not its leftmost leaf's.
     /// </summary>
-    private TypeRef? InferRenderedType(Expr value)
+    internal TypeRef? InferRenderedType(Expr value)
     {
         if (value is not CoalesceExpr co)
         {

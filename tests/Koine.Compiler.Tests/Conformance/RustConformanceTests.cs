@@ -2652,6 +2652,100 @@ public class RustConformanceTests
     }
 
     /// <summary>
+    /// Issue #1946 (the reporter's exact repro): a coalesce whose LEFT operand's declared type is
+    /// non-optional (a plain `Int` parameter) must never call `.or_else`/`.unwrap_or_else` on it — those
+    /// are `Option`-only methods, and calling them on a bare `i64` is a real `cargo check` E0599. The
+    /// right operand (`b: Decimal?`) is provably dead code once the left is guaranteed present; the
+    /// collapsed left widens to `Decimal` and `Some`-wraps to match the `total: Decimal?` ctor slot.
+    /// </summary>
+    [Fact]
+    public void Coalesce_collapses_when_left_operand_is_never_null()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  entity Product identified by ProductId {\n" +
+            "    total: Decimal?\n" +
+            "\n" +
+            "    create make(a: Int, b: Decimal?) {\n" +
+            "      total -> a ?? b\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        // Always-on guard (no toolchain required): the dead `.or_else(...)` tail is gone, and there is no
+        // redundant second `.map(Decimal::from)` from the factory ctor-arg reconciliation layer.
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+        rust.ShouldContain("Self::new(id, Some(Decimal::from(a)))");
+        rust.ShouldNotContain("or_else");
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1946 edge case: a non-optional left with NO numeric mismatch against the right (both
+    /// `String`) must still collapse (no `.or_else`), rendering bare — the `Some(...)` lift onto the
+    /// optional-declared `label` member comes from `BuildFactoryCtorArgs`'s own reconciliation, not from
+    /// `WriteCoalesce` itself, proving the two layers compose correctly.
+    /// </summary>
+    [Fact]
+    public void Coalesce_collapses_a_non_optional_left_with_no_widen_needed()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  entity Product identified by ProductId {\n" +
+            "    label: String?\n" +
+            "\n" +
+            "    create make(a: String, b: String) {\n" +
+            "      label -> a ?? b\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+        rust.ShouldContain("Self::new(id, Some(a.clone().to_string()))");
+        rust.ShouldNotContain("or_else");
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1946 edge case: a NESTED coalesce as the left operand of an outer coalesce, where the
+    /// inner coalesce's own left is ALSO non-optional, must collapse at both levels — the outer collapse
+    /// composes with the inner collapse purely through the ordinary recursive `Write`/`InferRenderedType`
+    /// dispatch, with no special-casing.
+    /// </summary>
+    [Fact]
+    public void Coalesce_collapses_a_nested_non_optional_left_operand()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  value Money {\n" +
+            "    x: Int\n" +
+            "    y: Int\n" +
+            "    z: Decimal\n" +
+            "    total: Decimal = (x ?? y) ?? z\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+        rust.ShouldNotContain("or_else");
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
     /// Issue #1332: an optional-declared <c>String?</c> derived member whose bare body ends in
     /// <c>.trim()</c> must own the result (<c>.to_string()</c>) before <c>WriteDerived</c>'s
     /// <c>Some(...)</c>-wrap is applied, or the emitted crate does not compile — the accessor's
