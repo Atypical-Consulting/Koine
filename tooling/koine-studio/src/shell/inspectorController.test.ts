@@ -898,7 +898,7 @@ describe('createInspectorController — Domain navigator doorways + cross-axis g
     expect(domById('panel-contextmap').hidden).toBe(false); // …showing the Context Map.
   });
 
-  test('a tactical leaf: selecting jumps via goto; "Reveal in Files" calls revealInFiles with the leaf context', async () => {
+  test('a tactical leaf: selecting jumps via gotoSourceSpan; "Reveal in Files" calls revealInFiles with the leaf context', async () => {
     const lsp = makeLsp();
     // Give the model graph a real aggregate-owned leaf so the tactical view has a row to act on (the
     // shared makeLsp().model is an empty graph). The aggregate carries the `<Ctx>.<Agg>` qualified name.
@@ -935,10 +935,13 @@ describe('createInspectorController — Domain navigator doorways + cross-axis g
     (domById('rail-domain-pane').querySelector('[data-ctx="Billing"]') as HTMLButtonElement).click();
     await flush();
 
-    // Selecting the Money leaf resolves through nodeContext/resolveInspectableQn and jumps to source.
+    // Selecting the Money leaf resolves through nodeContext/resolveInspectableQn and jumps to source —
+    // via the file-aware gotoSourceSpan seam (#1737), since Money has no diagram node here (no livingDocs
+    // fixture), so the span falls back to the active document + glossary name range.
     const leaf = domById('rail-domain-pane').querySelector<HTMLButtonElement>('.koi-tactical-leaf[data-name="Money"]')!;
     leaf.click();
-    expect(deps.editor.goto).toHaveBeenCalled();
+    expect(deps.gotoSourceSpan).toHaveBeenCalled();
+    expect(deps.editor.goto).not.toHaveBeenCalled();
     expect(deps.store.getState().selection?.qualifiedName).toBe('Billing.Money');
 
     // Its ⋯ overflow → "Reveal in Files" reveals the leaf's bounded context in the Files axis.
@@ -948,6 +951,228 @@ describe('createInspectorController — Domain navigator doorways + cross-axis g
     )!;
     item.click();
     expect(deps.revealInFiles).toHaveBeenCalledWith('Billing');
+  });
+});
+
+describe('createInspectorController — Domain navigator gotoSourceSpan wiring (#1737)', () => {
+  // The navigator's own in-rail Context Map graph only paints when the model declares relations
+  // (#483) — so this fixture needs a relation, plus a per-context `contextSpans` entry (#290).
+  function contextMapWithSpans(spans: Record<string, SourceSpan | null>): ContextMapResult {
+    return {
+      contexts: Object.keys(spans),
+      contextSpans: spans,
+      relations: [
+        {
+          upstream: 'Ordering',
+          downstream: 'Shipping',
+          kind: 'Customer/Supplier',
+          bidirectional: false,
+          sharedTypes: [],
+          acl: [],
+          upstreamRole: 'Supplier',
+          downstreamRole: 'Customer',
+        },
+      ],
+    };
+  }
+
+  test('a Context Map node click forwards the WHOLE span (file included) to deps.gotoSourceSpan — not deps.editor.goto', async () => {
+    const lsp = makeLsp();
+    const span: SourceSpan = { file: 'file:///shipping.koi', line: 3, column: 9, endLine: 3, endColumn: 14, offset: 20, length: 5 };
+    lsp.contextMap = vi.fn(async (): Promise<ContextMapResult> => contextMapWithSpans({ Ordering: null, Shipping: span }));
+    const deps = makeDeps(lsp);
+    const ctl = createInspectorController(deps);
+    ctl.init();
+    ctl.refreshActiveSurfaces();
+    await flush();
+
+    const doorway = domById('rail-domain-pane').querySelector<HTMLButtonElement>('[data-door="contextmap"]')!;
+    doorway.click();
+    await flush();
+
+    const node = domById('rail-domain-pane').querySelector<HTMLButtonElement>('[data-ctxmap-node="Shipping"]')!;
+    node.click();
+
+    expect(deps.gotoSourceSpan).toHaveBeenCalledWith(span);
+    expect(deps.editor.goto).not.toHaveBeenCalled();
+  });
+
+  test('a span-less context node reaches neither deps.gotoSourceSpan nor deps.editor.goto — inert, not a bogus jump into the active document', async () => {
+    const lsp = makeLsp();
+    lsp.contextMap = vi.fn(async (): Promise<ContextMapResult> => contextMapWithSpans({ Ordering: null, Shipping: null }));
+    const deps = makeDeps(lsp);
+    const ctl = createInspectorController(deps);
+    ctl.init();
+    ctl.refreshActiveSurfaces();
+    await flush();
+
+    const doorway = domById('rail-domain-pane').querySelector<HTMLButtonElement>('[data-door="contextmap"]')!;
+    doorway.click();
+    await flush();
+
+    const node = domById('rail-domain-pane').querySelector<HTMLButtonElement>('[data-ctxmap-node="Shipping"]')!;
+    node.click();
+
+    expect(deps.gotoSourceSpan).not.toHaveBeenCalled();
+    expect(deps.editor.goto).not.toHaveBeenCalled();
+  });
+});
+
+describe('createInspectorController — tactical rows jump to their declaring file (#1737 Task 3)', () => {
+  // A model graph with one context, one aggregate, and a value object owned by it — the same shape
+  // the existing tactical-leaf test above uses, so the Money leaf resolves through the same
+  // nodeContext/resolveInspectableQn path.
+  function billingModel(): ModelNode {
+    return {
+      kind: 'model',
+      qualifiedName: '',
+      title: '',
+      members: [],
+      children: [
+        {
+          kind: 'context',
+          qualifiedName: 'Billing',
+          title: 'Billing',
+          members: [],
+          children: [
+            {
+              kind: 'aggregate',
+              qualifiedName: 'Billing.Invoice',
+              title: 'Invoice',
+              members: [],
+              children: [{ kind: 'value', qualifiedName: 'Billing.Money', title: 'Money', members: [], children: [] }],
+            },
+          ],
+        },
+      ],
+    };
+  }
+
+  // Drill into Billing → tactical (mirrors the existing tactical-leaf test above) and return the Money
+  // leaf button.
+  async function drillToMoneyLeaf(): Promise<HTMLButtonElement> {
+    (domById('rail-domain-pane').querySelector('[data-ctx="Billing"]') as HTMLButtonElement).click();
+    await flush();
+    return domById('rail-domain-pane').querySelector<HTMLButtonElement>('.koi-tactical-leaf[data-name="Money"]')!;
+  }
+
+  test("a leaf whose element resolves to a diagram-node span in ANOTHER file jumps via deps.gotoSourceSpan (file included) — not deps.editor.goto", async () => {
+    const lsp = makeLsp();
+    lsp.model = vi.fn(async () => billingModel());
+    const span: SourceSpan = { file: 'file:///billing.koi', line: 5, column: 3, endLine: 5, endColumn: 8, offset: 40, length: 5 };
+    const moneyNode: DiagramNode = {
+      id: 'Billing.Money', label: 'Money', kind: 'value-object', qualifiedName: 'Billing.Money',
+      sourceSpan: span, stereotype: null, members: [],
+    };
+    lsp.livingDocs = vi.fn(async (): Promise<DocsResult> => ({
+      files: [{ path: 'billing.koi', contents: '', diagrams: [{ caption: 'Invoice', kind: 'aggregate', mermaid: '', graph: { nodes: [moneyNode], edges: [] } }] }],
+    }));
+    const deps = makeDeps(lsp);
+    const ctl = createInspectorController(deps);
+    ctl.init();
+    ctl.refreshActiveSurfaces();
+    await flush();
+
+    const leaf = await drillToMoneyLeaf();
+    leaf.click();
+
+    expect(deps.gotoSourceSpan).toHaveBeenCalledWith(span);
+    expect(deps.editor.goto).not.toHaveBeenCalled();
+  });
+
+  test('an element with no diagram node / span still jumps — via the active-document, nameRange-derived span — today\'s target position is preserved, not dropped', async () => {
+    const lsp = makeLsp(); // default lsp.livingDocs() => { files: [] }: Money has no diagram node
+    lsp.model = vi.fn(async () => billingModel());
+    const deps = makeDeps(lsp); // deps.activeUri() => 'file:///work/model.koi'
+    const ctl = createInspectorController(deps);
+    ctl.init();
+    ctl.refreshActiveSurfaces();
+    await flush();
+
+    const leaf = await drillToMoneyLeaf();
+    leaf.click();
+
+    // glossaryFixture's Billing.Money nameRange is 0-based { start: {line:1,character:8}, end: {line:1,character:13} }.
+    expect(deps.gotoSourceSpan).toHaveBeenCalledWith({
+      file: 'file:///work/model.koi',
+      line: 2,
+      column: 9,
+      endLine: 2,
+      endColumn: 14,
+    });
+    expect(deps.editor.goto).not.toHaveBeenCalled();
+  });
+
+  test("single-file workspace guard: when the resolved span's file equals the active uri, the jump still happens exactly once", async () => {
+    const lsp = makeLsp();
+    lsp.model = vi.fn(async () => billingModel());
+    const activeUri = 'file:///work/model.koi';
+    const span: SourceSpan = { file: activeUri, line: 5, column: 3, endLine: 5, endColumn: 8, offset: 40, length: 5 };
+    const moneyNode: DiagramNode = {
+      id: 'Billing.Money', label: 'Money', kind: 'value-object', qualifiedName: 'Billing.Money',
+      sourceSpan: span, stereotype: null, members: [],
+    };
+    lsp.livingDocs = vi.fn(async (): Promise<DocsResult> => ({
+      files: [{ path: 'model.koi', contents: '', diagrams: [{ caption: 'Invoice', kind: 'aggregate', mermaid: '', graph: { nodes: [moneyNode], edges: [] } }] }],
+    }));
+    const deps = makeDeps(lsp); // deps.activeUri() defaults to the same 'file:///work/model.koi'
+    const ctl = createInspectorController(deps);
+    ctl.init();
+    ctl.refreshActiveSurfaces();
+    await flush();
+
+    const leaf = await drillToMoneyLeaf();
+    leaf.click();
+
+    expect(deps.gotoSourceSpan).toHaveBeenCalledTimes(1);
+    expect(deps.gotoSourceSpan).toHaveBeenCalledWith(span);
+    expect(deps.editor.goto).not.toHaveBeenCalled();
+  });
+
+  // Code-review follow-up (#1737): loadHistory (Properties-panel git history) now shares its "prefer
+  // the element's own span, else the active document + name range" resolution with tacticalHandlers.goto
+  // above, via the same bestJumpSpan helper — this pins loadHistory's own git-log range math still holds.
+  test("loadHistory uses the element's own diagram-node span (file + 1-based inclusive line range) when it has one", async () => {
+    const lsp = makeLsp();
+    lsp.model = vi.fn(async () => billingModel());
+    const span: SourceSpan = { file: 'file:///billing.koi', line: 5, column: 3, endLine: 8, endColumn: 1, offset: 40, length: 5 };
+    const moneyNode: DiagramNode = {
+      id: 'Billing.Money', label: 'Money', kind: 'value-object', qualifiedName: 'Billing.Money',
+      sourceSpan: span, stereotype: null, members: [],
+    };
+    lsp.livingDocs = vi.fn(async (): Promise<DocsResult> => ({
+      files: [{ path: 'billing.koi', contents: '', diagrams: [{ caption: 'Invoice', kind: 'aggregate', mermaid: '', graph: { nodes: [moneyNode], edges: [] } }] }],
+    }));
+    const gitLogForRange = vi.fn(async () => null);
+    const deps = makeDeps(lsp, { platform: fakePlatform({ gitLogForRange }) });
+    const ctl = createInspectorController(deps);
+    ctl.init();
+    ctl.refreshActiveSurfaces();
+    await flush();
+
+    ctl.selection.set({ qualifiedName: 'Billing.Money', context: 'Billing' });
+    await flush();
+
+    // span.endLine (8) is end-EXCLUSIVE, so git -L's inclusive end is endLine - 1 = 7.
+    expect(gitLogForRange).toHaveBeenCalledWith('/billing.koi', 5, 7);
+  });
+
+  test('loadHistory falls back to the active document + glossary name range when the element has no diagram-node span', async () => {
+    const lsp = makeLsp(); // default lsp.livingDocs() => { files: [] }: Money has no diagram node
+    lsp.model = vi.fn(async () => billingModel());
+    const gitLogForRange = vi.fn(async () => null);
+    const deps = makeDeps(lsp, { platform: fakePlatform({ gitLogForRange }) }); // activeUri() => 'file:///work/model.koi'
+    const ctl = createInspectorController(deps);
+    ctl.init();
+    ctl.refreshActiveSurfaces();
+    await flush();
+
+    ctl.selection.set({ qualifiedName: 'Billing.Money', context: 'Billing' });
+    await flush();
+
+    // glossaryFixture's Billing.Money nameRange is 0-based { start: {line:1,...}, end: {line:1,...} } —
+    // today's exact fallback behaviour: both bounds are nameRange.line + 1, on the active document.
+    expect(gitLogForRange).toHaveBeenCalledWith('/work/model.koi', 2, 2);
   });
 });
 

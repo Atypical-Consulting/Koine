@@ -31,7 +31,7 @@
 // panel-specific ContextMenu affordance.
 import { render } from 'preact';
 import type { ComponentChildren, VNode } from 'preact';
-import type { ContextMapResult, DiagramNode, GlossaryModel, ModelNode } from '@/lsp/lsp';
+import type { ContextMapResult, DiagramNode, GlossaryModel, ModelNode, SourceSpan } from '@/lsp/lsp';
 import { constructForKind, constructIcon, countsByContext, type ModelOutlineHandlers } from '@/model/modelOutline';
 import { filterGlossaryModel, isAllContexts, type ContextScope } from '@/model/activeContext';
 import { buildContextMapGraph, type ContextMapEdge } from '@/diagrams/contextMapGraph';
@@ -591,10 +591,10 @@ function TacticalView({
 
 /** Wiring for the strategic Context Map graph — what a context node does when activated. */
 export interface ContextMapHandlers {
-  /** Jump the editor to a 1-based line/column: the navigator's EXISTING jump-to-declaration seam
-   *  ({@link ModelOutlineHandlers.goto}, already wired to `editor.goto`), fed from the context's
-   *  declaration span in `contextSpans` (#290). A span-less context stays inert. */
-  goto: (line: number, column: number) => void;
+  /** Jump the editor to the context's declaration span from `contextSpans` (#290) — OPENING that
+   *  document first when it isn't the active buffer, via the app-wide
+   *  {@link ModelOutlineHandlers.gotoSourceSpan} seam. A span-less context stays inert. */
+  gotoSourceSpan: (span: Pick<SourceSpan, 'file' | 'line' | 'column' | 'endLine' | 'endColumn'>) => void;
   /** Hand off to the caller's FULL Context Map view — the center-deck destination
    *  ({@link StrategicHandlers.onOpenContextMap}) with the maxGraph canvas, the Graph/Table toggle and
    *  the shared-types / anti-corruption detail strip this 260px rail level deliberately summarizes away.
@@ -615,7 +615,7 @@ function ContextMapNode({ node, handlers }: { node: DiagramNode; handlers: Conte
       role="treeitem"
       aria-label={span ? `${node.label}, go to declaration` : node.label}
       onClick={() => {
-        if (span) handlers.goto(span.line, span.column);
+        if (span) handlers.gotoSourceSpan(span);
       }}
     >
       <Glyph symbol="◈" />
@@ -907,11 +907,11 @@ export function DomainNavigator({
     onOpenGlossary: () => handlers.onOpenGlossary?.(),
   };
 
-  /** The graph's jump-to-declaration, routed through the navigator's existing `goto(line, col)` seam,
+  /** The graph's jump-to-declaration, routed through the navigator's file-aware `gotoSourceSpan` seam,
    *  plus the level's escape hatch to the caller's FULL Context Map view — the SAME hand-off the doorway
    *  falls back to when there's nothing to graph, so the richer destination is reachable either way. */
   const contextMapHandlers: ContextMapHandlers = {
-    goto: (line, column) => handlers.goto?.(line, column),
+    gotoSourceSpan: (span) => handlers.gotoSourceSpan?.(span),
     openFullMap: () => handlers.onOpenContextMap?.(),
   };
 
