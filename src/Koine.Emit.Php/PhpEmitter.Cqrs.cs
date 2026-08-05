@@ -245,6 +245,19 @@ public sealed partial class PhpEmitter
         var handlerName = name + "Handler";
         var resultType = typeMapper.Map(q.ResultType, contextName);
 
+        // Per-criterion/result import hint for Assemble/CollectUses (issue #1742, the sixth call site
+        // of the #1701/#1712/#1716/#1718 gap): a criterion parameter's or the result type's own `use`
+        // import must resolve against ITS declared type's context — the explicit `Context.Type`
+        // qualifier when present, else this query's own context — not unconditionally this query's own
+        // context. Like a repository or service (#1718), a query isn't tied to one entity's own field
+        // set, so it gets its own dictionary built from scratch.
+        var symbolContext = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (Param p in q.Criteria)
+        {
+            CollectImportHints(p.Type, contextName, symbolContext);
+        }
+        CollectImportHints(q.ResultType, contextName, symbolContext);
+
         var sb = new StringBuilder();
         WriteDoc(sb, q.Doc ?? $"Query returning {resultType}; handled by {handlerName}.", "");
 
@@ -304,7 +317,7 @@ public sealed partial class PhpEmitter
 
         return new EmittedFile(
             PathFor(contextName, KindFolder.Queries, q.Name),
-            Assemble(contextName, KindFolder.Queries, sb.ToString(), name),
+            Assemble(contextName, KindFolder.Queries, sb.ToString(), name, symbolContext),
             Kind: KindForFolder(KindFolder.Queries));
     }
 

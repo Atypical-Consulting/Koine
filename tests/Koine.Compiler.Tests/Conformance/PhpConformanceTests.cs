@@ -1908,6 +1908,189 @@ public class PhpConformanceTests
     }
 
     /// <summary>
+    /// Issue #1742 — the FIFTH call site of the #1701/#1712/#1716/#1718 qualifier-blind import gap:
+    /// <c>EmitEvent</c>, like <c>EmitRepository</c>/<c>EmitApplicationService</c>/<c>EmitDomainService</c>
+    /// (#1718), passes NO <c>symbolContext</c> to <c>Assemble</c> at all. An event member declared with
+    /// an EXPLICIT cross-context qualifier (<c>Shipping.Status</c>) must import that exact type, not a
+    /// same-named sibling from the event's own declaring context — this issue's own repro model,
+    /// verbatim.
+    /// </summary>
+    [Fact]
+    public void Event_member_import_honors_an_explicit_qualifier_over_the_owning_context()
+    {
+        const string src =
+            """
+            context Ordering {
+              enum Status {
+                Alpha
+                Beta
+                Gamma
+              }
+
+              event OrderShipped {
+                status: Shipping.Status
+              }
+            }
+
+            context Shipping {
+              enum Status {
+                Active
+                Inactive
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new PhpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var ev = result.Files.Single(f => f.RelativePath.EndsWith("OrderShipped.php", StringComparison.Ordinal)).Contents;
+        ev.ShouldContain("use Koine\\Shipping\\Enums\\Status;");
+        ev.ShouldNotContain("use Koine\\Ordering\\Enums\\Status;");
+        ev.ShouldContain("public readonly Status $status");
+    }
+
+    /// <summary>
+    /// The runtime twin of
+    /// <see cref="Event_member_import_honors_an_explicit_qualifier_over_the_owning_context"/>: with
+    /// the wrong import, <c>OrderShipped</c>'s constructor is type-hinted against <c>Ordering</c>'s own
+    /// <c>Status</c>, so constructing it with <c>Shipping</c>'s own <c>Status::ACTIVE</c> is a hard
+    /// runtime <c>TypeError</c> under <c>declare(strict_types=1)</c>. Skipped (not failed) when no
+    /// <c>php</c> interpreter is present locally; CI runs it for real.
+    /// </summary>
+    [Fact]
+    public void Event_member_binds_the_qualified_type_at_runtime()
+    {
+        const string src =
+            """
+            context Ordering {
+              enum Status {
+                Alpha
+                Beta
+                Gamma
+              }
+
+              event OrderShipped {
+                status: Shipping.Status
+              }
+            }
+
+            context Shipping {
+              enum Status {
+                Active
+                Inactive
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new PhpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        const string driver = """
+            <?php
+            declare(strict_types=1);
+            require __DIR__ . '/src/Shipping/Enums/Status.php';
+            require __DIR__ . '/src/Ordering/Enums/Status.php';
+            require __DIR__ . '/src/Ordering/Events/OrderShipped.php';
+
+            $event = new Koine\Ordering\Events\OrderShipped(Koine\Shipping\Enums\Status::ACTIVE);
+            if ($event->status !== Koine\Shipping\Enums\Status::ACTIVE) {
+                fwrite(STDERR, "expected Shipping's own Status::ACTIVE, got " . var_export($event->status, true) . "\n");
+                exit(1);
+            }
+            """;
+
+        TestSupport.PhpCheck run = TestSupport.RunPhp(result.Files, driver);
+        TestSupport.RequireOrSkip(run.ToolchainAvailable, NoInterpreterNotice);
+        run.Ok.ShouldBeTrue(
+            "OrderShipped's 'status' member must bind Shipping's own Status enum (not "
+            + "Ordering's wrongly imported, differently-cased same-named sibling enum) at runtime:\n"
+            + string.Join("\n", run.Errors));
+    }
+
+    /// <summary>
+    /// The query-criteria sibling of
+    /// <see cref="Event_member_import_honors_an_explicit_qualifier_over_the_owning_context"/> (issue
+    /// #1742, the SIXTH call site): <c>EmitQuery</c> shares the exact same qualifier-blind gap for a
+    /// criteria parameter's own import.
+    /// </summary>
+    [Fact]
+    public void Query_criteria_parameter_import_honors_an_explicit_qualifier_over_the_owning_context()
+    {
+        const string src =
+            """
+            context Ordering {
+              enum Status {
+                Alpha
+                Beta
+                Gamma
+              }
+
+              value OrderSummary {
+                label: String
+              }
+
+              readmodel OrderSummaryView from OrderSummary {
+                label
+              }
+
+              query OrdersByShippingStatus(status: Shipping.Status): OrderSummaryView
+            }
+
+            context Shipping {
+              enum Status {
+                Active
+                Inactive
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new PhpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var q = result.Files.Single(f => f.RelativePath.EndsWith("OrdersByShippingStatus.php", StringComparison.Ordinal)).Contents;
+        q.ShouldContain("use Koine\\Shipping\\Enums\\Status;");
+        q.ShouldNotContain("use Koine\\Ordering\\Enums\\Status;");
+        q.ShouldContain("public Status $status");
+    }
+
+    /// <summary>
+    /// The query-result-type sibling of the same gap (issue #1742): <c>EmitQuery</c>'s non-void result
+    /// type must also resolve its own explicit qualifier, not the query's own declaring context.
+    /// </summary>
+    [Fact]
+    public void Query_result_type_import_honors_an_explicit_qualifier_over_the_owning_context()
+    {
+        const string src =
+            """
+            context Ordering {
+              value LocalThing {
+                code: String
+              }
+
+              readmodel ShippingSummary from LocalThing {
+                code
+              }
+
+              query CurrentShippingSummary(orderId: String): Shipping.ShippingSummary
+            }
+
+            context Shipping {
+              value Item {
+                status: String
+              }
+
+              readmodel ShippingSummary from Item {
+                status
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new PhpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var q = result.Files.Single(f => f.RelativePath.EndsWith("CurrentShippingSummary.php", StringComparison.Ordinal)).Contents;
+        q.ShouldContain("use Koine\\Shipping\\ReadModels\\ShippingSummary;");
+        q.ShouldNotContain("use Koine\\Ordering\\ReadModels\\ShippingSummary;");
+        q.ShouldContain("@extends QueryHandler<CurrentShippingSummary, ShippingSummary>");
+    }
+
+    /// <summary>
     /// Issue #1531 (audit, Task 4) — the Rust (#1467/PR #1476) and Java (#1480/PR #1521) emitters both
     /// shipped the identical bug in their factory constructor-argument loop's auto-bound branch: a
     /// <c>required</c>-bucket member declared optional but carrying no member-level default
