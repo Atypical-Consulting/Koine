@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text.RegularExpressions;
 using Koine.Compiler.Ast;
+using Koine.Compiler.Formatting;
 
 namespace Koine.Compiler.Semantics.Scenarios;
 
@@ -23,6 +24,7 @@ internal sealed class ScenarioInterpreter
 {
     private readonly SemanticModel _sema;
     private readonly ModelIndex _index;
+    private readonly IReadOnlyDictionary<string, AstPrinter> _printers;
     private readonly List<string> _notes = new();
 
     private EntityDecl _entity = null!;
@@ -34,15 +36,20 @@ internal sealed class ScenarioInterpreter
     // forever (a StackOverflowException would break the never-throw contract).
     private readonly HashSet<string> _evaluatingDerived = new(StringComparer.Ordinal);
 
-    private ScenarioInterpreter(SemanticModel sema)
+    private ScenarioInterpreter(SemanticModel sema, IReadOnlyDictionary<string, string>? sourcesByFile)
     {
         _sema = sema;
         _index = sema.Index;
+        _printers = ScenarioConditionRenderer.BuildPrinters(sourcesByFile);
     }
 
-    /// <summary>Runs <paramref name="scenario"/> against <paramref name="sema"/> and returns its timeline.</summary>
-    public static ScenarioResult Run(SemanticModel sema, Scenario scenario) =>
-        new ScenarioInterpreter(sema).RunCore(scenario);
+    /// <summary>Runs <paramref name="scenario"/> against <paramref name="sema"/> and returns its timeline.
+    /// <paramref name="sourcesByFile"/> (file path → source text, #1752) lets <c>requires</c>/<c>invariant</c>
+    /// condition text render with its original operators intact; omit it to keep today's tree-walk
+    /// rendering (e.g. for a synthesized model with no source).</summary>
+    public static ScenarioResult Run(
+        SemanticModel sema, Scenario scenario, IReadOnlyDictionary<string, string>? sourcesByFile = null) =>
+        new ScenarioInterpreter(sema, sourcesByFile).RunCore(scenario);
 
     private ScenarioResult RunCore(Scenario s)
     {
@@ -260,7 +267,8 @@ internal sealed class ScenarioInterpreter
             {
                 case RequiresClause req:
                     CheckOutcome outcome = Outcome(Eval(req.Condition, env));
-                    steps.Add(new ScenarioStep.Precondition(req.Message, req.Condition.ToFullString(), outcome));
+                    steps.Add(new ScenarioStep.Precondition(
+                        req.Message, ScenarioConditionRenderer.Render(req.Condition, _printers), outcome));
                     if (outcome != CheckOutcome.Passed)
                     {
                         // Fail closed: anything short of a proven Passed rejects the guard, including
@@ -348,7 +356,7 @@ internal sealed class ScenarioInterpreter
         foreach (Invariant inv in entity.Invariants)
         {
             CheckOutcome outcome = Outcome(Eval(inv.Condition, env));
-            checks.Add(new InvariantCheck(inv.Message, inv.Condition.ToFullString(), outcome));
+            checks.Add(new InvariantCheck(inv.Message, ScenarioConditionRenderer.Render(inv.Condition, _printers), outcome));
         }
 
         return checks;

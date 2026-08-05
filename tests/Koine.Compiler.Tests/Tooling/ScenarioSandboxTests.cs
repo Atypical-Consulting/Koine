@@ -101,9 +101,11 @@ public class ScenarioSandboxTests
         var (model, diagnostics) = new KoineCompiler().Parse(sources);
         diagnostics.ShouldBeEmpty();
         model.ShouldNotBeNull();
+        IReadOnlyDictionary<string, string> sourcesByFile =
+            sources.ToDictionary(s => s.Path, s => s.Source, StringComparer.Ordinal);
         string inProcess = ScenarioService.WriteJson(
             ScenarioService.Shape(
-                ScenarioExecutor.Run(new SemanticModel(model), scenario), ScenarioService.ExecutedMode));
+                ScenarioExecutor.Run(new SemanticModel(model), scenario, sourcesByFile), ScenarioService.ExecutedMode));
 
         ScenarioChildRun run = ScenarioExecutionHost.RunDetailed(sources, scenario, RoundTripBudget);
         string sandboxed = ScenarioService.WriteJson(WithoutSandboxNotes(run));

@@ -27,6 +27,13 @@ public class ScenarioExecutionTests
 
     private static readonly Lazy<SemanticModel> Pizzeria = new(() => BuildTemplate("pizzeria"));
 
+    /// <summary>File → source lookup for the same template (#1752): what a source-backed condition
+    /// rendering needs, so a test can pass both engines the source and compare their text exactly.</summary>
+    private static readonly Lazy<IReadOnlyDictionary<string, string>> PizzeriaSources =
+        new(() => Directory
+            .EnumerateFiles(TemplateFolder("pizzeria"), "*.koi", SearchOption.AllDirectories)
+            .ToDictionary(p => p, File.ReadAllText, StringComparer.Ordinal));
+
     private static SemanticModel BuildTemplate(string template)
     {
         var sources = Directory
@@ -134,16 +141,16 @@ public class ScenarioExecutionTests
         ScenarioResult interpreted = ScenarioInterpreter.Run(sema, scenario);
         interpreted.Ok.ShouldBeTrue();
 
-        ScenarioResult executed = ScenarioExecutor.Run(sema, scenario);
+        ScenarioResult executed = ScenarioExecutor.Run(sema, scenario, PizzeriaSources.Value);
 
         executed.Ok.ShouldBeFalse();
         InvariantCheck failed = executed.Invariants.ShouldHaveSingleItem();
         failed.Outcome.ShouldBe(CheckOutcome.Failed);
         failed.Message.ShouldBe("an amount cannot be negative");
         // The check is resolved back to the DECLARED invariant on Money, so it carries the modelled
-        // condition text — not merely the rule string the exception happened to carry.
-        failed.Condition.ShouldContain("amount");
-        failed.Condition.ShouldNotBe(failed.Message);
+        // condition text, operators intact (#1752) — not merely the rule string the exception happened
+        // to carry.
+        failed.Condition.ShouldBe("amount >= 0");
         executed.Notes.ShouldContain(n => n.Contains("an amount cannot be negative"));
     }
 
@@ -237,6 +244,28 @@ public class ScenarioExecutionTests
             .ShouldBe(interpreted.Invariants.Select(i => (i.Message, i.Condition, i.Outcome)));
         executed.ResultingState.Keys.ShouldBe(interpreted.ResultingState.Keys);
         executed.ResultingState["status"].ShouldBe("Placed");
+    }
+
+    // ------------------------------------------------------------------------
+    // #1752: the executed-mode runner renders `requires`/`invariant` conditions through the SAME
+    // source-backed helper as the interpreter, so the two engines can never drift.
+    // ------------------------------------------------------------------------
+
+    [Fact]
+    public void Executed_mode_condition_text_matches_interpreted_mode_and_keeps_operators_intact()
+    {
+        SemanticModel sema = Pizzeria.Value;
+        Scenario scenario = OrderScenario("place", "Draft", Line("MARG", 2, 10m));
+
+        ScenarioResult interpreted = ScenarioInterpreter.Run(sema, scenario, PizzeriaSources.Value);
+        ScenarioResult executed = ScenarioExecutor.Run(sema, scenario, PizzeriaSources.Value);
+
+        interpreted.Steps.OfType<ScenarioStep.Precondition>().Select(p => p.Condition)
+            .ShouldContain("status == Draft");
+        executed.Steps.OfType<ScenarioStep.Precondition>().Select(p => p.Condition)
+            .ShouldBe(interpreted.Steps.OfType<ScenarioStep.Precondition>().Select(p => p.Condition));
+        executed.Invariants.Select(i => i.Condition)
+            .ShouldBe(interpreted.Invariants.Select(i => i.Condition));
     }
 
     // ------------------------------------------------------------------------

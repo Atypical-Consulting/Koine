@@ -1008,6 +1008,113 @@ public class JavaConformanceTests
     }
 
     /// <summary>
+    /// #1944: <c>WriteCoalesce</c> unconditionally treated a coalesce's LEFT operand as
+    /// <c>Optional</c>-typed, but Koine's <c>??</c> is legal over any left operand. Here <c>a: Int</c> is
+    /// non-optional, so Java renders it as the unboxed primitive <c>long</c> — calling <c>.or(...)</c> on it
+    /// is a hard <c>javac</c> "long cannot be dereferenced" error. Since <c>a</c> can never be null, the
+    /// <c>?? b</c> fallback is provably dead: the fix must collapse to bare <c>a</c> (widened to
+    /// <c>BigDecimal</c> against the <c>Decimal?</c> right operand) wrapped in <c>Optional.of(...)</c> at the
+    /// call site, since the declared member is optional — no <c>.or</c>/<c>.orElse</c> at all.
+    /// </summary>
+    [Fact]
+    public void Coalesce_collapses_when_left_operand_is_never_null()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  entity Product identified by ProductId {\n" +
+            "    total: Decimal?\n" +
+            "\n" +
+            "    create make(a: Int, b: Decimal?) {\n" +
+            "      total -> a ?? b\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new JavaEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var product = result.Files.Single(f => f.RelativePath.EndsWith("Product.java", StringComparison.Ordinal)).Contents;
+        product.ShouldContain("new Product(id, java.util.Optional.of(java.math.BigDecimal.valueOf(a)))");
+        product.ShouldNotContain(".or(");
+        product.ShouldNotContain(".orElse(");
+
+        var r = TestSupport.CompileJava(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// #1944: the same non-optional-left collapse, but with matching non-numeric types (no widen needed) —
+    /// the declared member is still optional, so the caller-side <c>InferReconcilableValueType</c> must
+    /// still wrap the bare <c>a</c> in <c>Optional.of(...)</c> even though <c>WriteCoalesce</c> itself emits
+    /// no <c>.or</c>/<c>.orElse</c>.
+    /// </summary>
+    [Fact]
+    public void Coalesce_collapses_a_non_optional_left_with_no_widen_needed()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  entity Product identified by ProductId {\n" +
+            "    label: String?\n" +
+            "\n" +
+            "    create make(a: String, b: String?) {\n" +
+            "      label -> a ?? b\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new JavaEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var product = result.Files.Single(f => f.RelativePath.EndsWith("Product.java", StringComparison.Ordinal)).Contents;
+        product.ShouldContain("new Product(id, java.util.Optional.of(a))");
+        product.ShouldNotContain(".or(");
+        product.ShouldNotContain(".orElse(");
+
+        var r = TestSupport.CompileJava(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// #1944: a non-optional left against a non-optional DECLARED target member — no wrap and no widen
+    /// needed, so the whole coalesce collapses to the bare left operand with no <c>Optional</c> involvement
+    /// at all. <c>b</c> is deliberately non-optional too (not <c>Decimal?</c> as in the issue's edge case
+    /// 3): a non-optional-left/optional-right pair here would trip a pre-existing, unrelated
+    /// <c>TypeResolver.VisitCoalesce</c> gap (it derives <c>a ?? b</c>'s optionality solely from the RIGHT
+    /// operand, so an optional right makes the whole expression look optional even though a non-optional
+    /// left already guarantees a value) and get rejected by KOI0401 before this fix's emitter code ever
+    /// runs. This still exercises the exact same <c>leftType?.IsOptional == false</c> bare-emission branch.
+    /// </summary>
+    [Fact]
+    public void Coalesce_collapses_a_non_optional_left_against_a_non_optional_declared_member()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  entity Product identified by ProductId {\n" +
+            "    total: Decimal\n" +
+            "\n" +
+            "    create make(a: Decimal, b: Decimal) {\n" +
+            "      total -> a ?? b\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new JavaEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var product = result.Files.Single(f => f.RelativePath.EndsWith("Product.java", StringComparison.Ordinal)).Contents;
+        product.ShouldContain("new Product(id, a)");
+        product.ShouldNotContain(".or(");
+        product.ShouldNotContain(".orElse(");
+        product.ShouldNotContain("Optional.of(");
+
+        var r = TestSupport.CompileJava(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
     /// A real compile error must be reported, not silently swallowed — this proves the harness is a
     /// genuine <c>javac</c> check (the analogue of the Rust/Python negative fixtures). We take the same
     /// well-formed emit and corrupt one file's contents with a deliberate syntax error; the compile must
@@ -2387,6 +2494,159 @@ public class JavaConformanceTests
         var orderRow = result.Files.Single(f => f.RelativePath.EndsWith("OrderRow2.java", StringComparison.Ordinal)).Contents;
         orderRow.ShouldContain("src.price(), src.label()");
         orderRow.ShouldNotContain("BigDecimal.valueOf");
+
+        var r = TestSupport.CompileJava(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1727 — the whole-target audit of the explicit-qualifier / wrong-owning-context bug family
+    /// (already fixed construct-by-construct in PHP/Python: #1700, #1701, #1711, #1712, #1716, #1718)
+    /// against the Java emitter. <c>Ordering</c> declares its own <c>value Money</c> — the SAME simple
+    /// name as <c>Shipping</c>'s — so any call site that silently drops an explicit <c>Shipping.Money</c>
+    /// qualifier resolves through <see cref="Ast.ModelIndex.ResolveOwner"/>'s rule 3 ("a reference from
+    /// within one of the type's own owning contexts binds locally") straight back to <c>Ordering</c>'s
+    /// OWN same-named copy — printed bare (same package as the emitting context) instead of
+    /// package-qualified to <c>Shipping</c>. This single fixture exercises every cross-context resolution
+    /// call site the audit enumerated (entity member, factory + command parameters, repository finder
+    /// parameter, domain-service operation + application-service use-case parameters, read-model direct
+    /// and derived fields, an ACL translator endpoint, and an integration-event subscriber) plus the one
+    /// the audit found defective: <c>JavaExpressionTranslator.WriteSum</c>'s value-object fold selector.
+    /// A <c>policy</c> trigger is deliberately NOT included — <c>KoineParser.g4</c>'s <c>policyDecl</c>
+    /// takes a bare <c>Identifier</c>, so no <c>Context.Event</c> qualifier syntax reaches it at all.
+    /// </summary>
+    private const string QualifierResolutionAuditFixture = """
+        contextmap {
+          Legacy -> Billing : anti-corruption-layer
+            acl { Legacy.Account -> Billing.Customer }
+          Payments -> Notifications : open-host
+        }
+
+        context Shipping {
+          value Money {
+            amount: Decimal
+          }
+        }
+
+        context Ordering {
+          // Same simple name as Shipping.Money — the collision that exposes a dropped qualifier: a
+          // fallback that ignores an explicit Context.T qualifier binds locally to THIS copy instead.
+          value Money {
+            amount: Decimal
+          }
+
+          event OrderPlaced {
+            order: OrderId
+          }
+
+          value OrderLine {
+            unitPrice: Shipping.Money
+          }
+
+          // The WriteSum defect: the sum-fold selector's type must resolve to Shipping.Money, not
+          // Ordering's own same-named copy.
+          value Basket {
+            lines: List<OrderLine>
+            total: Shipping.Money = lines.sum(l => l.unitPrice)
+          }
+
+          aggregate Sales root Order {
+            repository {
+              operations: getById, add
+              find byMinCost(floor: Shipping.Money): List<Order>
+            }
+
+            entity Order identified by OrderId {
+              quantity: Int
+              cost:     Shipping.Money
+
+              command setShippingCost(newCost: Shipping.Money): Shipping.Money {
+                result newCost
+              }
+
+              create place(quantity: Int, cost: Shipping.Money) {
+                emit OrderPlaced(order: id)
+              }
+            }
+          }
+
+          service PricingRouter {
+            operation currentPrice(price: Shipping.Money): Shipping.Money = price
+            usecase RecordShippingCost(order: OrderId, cost: Shipping.Money)
+          }
+
+          readmodel OrderLineSummary from OrderLine {
+            unitPrice
+            doubledPrice: Shipping.Money = unitPrice
+          }
+        }
+
+        context Legacy {
+          value Account { reference: String }
+        }
+
+        context Billing {
+          value Customer { name: String }
+        }
+
+        context Payments {
+          integration event ChargeSettled {
+            reference: String
+          }
+
+          publishes ChargeSettled
+        }
+
+        context Notifications {
+          subscribes Payments.ChargeSettled
+        }
+        """;
+
+    /// <summary>
+    /// Every emitted reference to the colliding <c>Money</c> type — across every call-site family the
+    /// fixture exercises — must carry <c>Shipping</c>'s package, never <c>Ordering</c>'s own same-named
+    /// copy nor a bare (unqualified) name. The ACL translator and the integration-event handler are
+    /// asserted too, even though they carry no name collision (their qualifier is grammar-mandatory), so
+    /// a regression there fails loudly in the same fixture.
+    /// </summary>
+    [Fact]
+    public void Cross_context_qualifier_resolution_is_honored_across_every_java_call_site()
+    {
+        var result = new KoineCompiler().Compile(QualifierResolutionAuditFixture, new JavaEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        const string shippingMoney = "koine.generated.shipping.Money";
+
+        var orderLine = result.Files.Single(f => f.RelativePath.EndsWith("OrderLine.java", StringComparison.Ordinal)).Contents;
+        orderLine.ShouldContain($"{shippingMoney} unitPrice"); // member field
+
+        var basket = result.Files.Single(f => f.RelativePath.EndsWith("Basket.java", StringComparison.Ordinal)).Contents;
+        basket.ShouldContain($".reduce({shippingMoney}::plus)"); // #1727's own defect: the sum-fold selector
+        basket.ShouldNotContain(".reduce(Money::plus)");         // would print bare if it fell back to Ordering's own Money
+
+        var order = result.Files.Single(f => f.RelativePath.EndsWith("ordering/Order.java", StringComparison.Ordinal)).Contents;
+        order.ShouldContain($"{shippingMoney} cost");                          // entity member
+        order.ShouldContain($"public static Order place(long quantity, {shippingMoney} cost)"); // factory parameter
+        order.ShouldContain($"public {shippingMoney} setShippingCost({shippingMoney} newCost)"); // command parameter + return
+
+        var repository = result.Files.Single(f => f.RelativePath.EndsWith("ordering/OrderRepository.java", StringComparison.Ordinal)).Contents;
+        repository.ShouldContain($"List<Order> byMinCost({shippingMoney} floor)"); // repository finder parameter
+
+        var pricingRouter = result.Files.Single(f => f.RelativePath.EndsWith("PricingRouter.java", StringComparison.Ordinal)).Contents;
+        pricingRouter.ShouldContain($"{shippingMoney} currentPrice({shippingMoney} price)"); // domain-service operation
+        pricingRouter.ShouldContain($"recordShippingCost(OrderId order, {shippingMoney} cost)"); // application-service use case
+
+        var summary = result.Files.Single(f => f.RelativePath.EndsWith("OrderLineSummary.java", StringComparison.Ordinal)).Contents;
+        summary.ShouldContain($"{shippingMoney} unitPrice");    // read-model direct field
+        summary.ShouldContain($"{shippingMoney} doubledPrice"); // read-model derived field
+
+        var translator = result.Files.Single(f => f.RelativePath.EndsWith("billing/LegacyToBillingTranslator.java", StringComparison.Ordinal)).Contents;
+        translator.ShouldContain("Customer translateAccountToCustomer(koine.generated.legacy.Account source)"); // ACL endpoint
+
+        var handler = result.Files.Single(f => f.RelativePath.EndsWith("notifications/HandleChargeSettled.java", StringComparison.Ordinal)).Contents;
+        handler.ShouldContain("handle(koine.generated.payments.ChargeSettled event)"); // subscriber event
 
         var r = TestSupport.CompileJava(result.Files);
         TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);

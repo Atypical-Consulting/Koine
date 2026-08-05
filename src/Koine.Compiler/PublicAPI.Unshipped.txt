@@ -6,6 +6,7 @@
 *REMOVED*Koine.Compiler.Emit.EmitterOptions.EmitterOptions(System.Collections.Generic.IReadOnlyDictionary<string!, string!>! NamespaceMap, string? InstantMode = null, string? Layout = null, bool EmitSourceMaps = false, bool ReferenceOnly = false, string? Layers = null, bool ApplicationMediatr = false, string? ApplicationMapping = null) -> void
 *REMOVED*Koine.Compiler.Emit.EmitterOptions.EmitterOptions(System.Collections.Generic.IReadOnlyDictionary<string!, string!>! NamespaceMap, string? InstantMode = null, string? Layout = null, bool EmitSourceMaps = false, bool ReferenceOnly = false, string? Layers = null, bool ApplicationMediatr = false, string? ApplicationMapping = null, int? RegexMatchTimeoutMs = null) -> void
 *REMOVED*override Koine.Compiler.Ast.PrimitiveType.Name.get -> string?
+*REMOVED*static Koine.Compiler.Services.ScenarioService.Run(Koine.Compiler.Ast.SemanticModel! semantic, string! target, string! operation, System.Text.Json.JsonElement given, System.Text.Json.JsonElement args) -> System.Collections.Generic.IReadOnlyDictionary<string!, object?>!
 Koine.Compiler.Ast.ApiAnnotationInfo
 Koine.Compiler.Ast.ApiAnnotationInfo.<Clone>$() -> Koine.Compiler.Ast.ApiAnnotationInfo!
 Koine.Compiler.Ast.ApiAnnotationInfo.ApiAnnotationInfo() -> void
@@ -412,7 +413,7 @@ static Koine.Compiler.Services.ModelRoundTripService.MembersOf(Koine.Compiler.As
 static Koine.Compiler.Services.ModelRoundTripService.ModelToJson(Koine.Compiler.Ast.KoineModel! model, string? qualifiedName = null) -> Koine.Compiler.Services.ModelNode!
 static Koine.Compiler.Services.ScenarioService.Catalog(Koine.Compiler.Ast.SemanticModel! semantic) -> System.Collections.Generic.IReadOnlyDictionary<string!, object?>!
 static Koine.Compiler.Services.ScenarioService.Error(string! target, string! operation, string! note) -> System.Collections.Generic.IReadOnlyDictionary<string!, object?>!
-static Koine.Compiler.Services.ScenarioService.Run(Koine.Compiler.Ast.SemanticModel! semantic, string! target, string! operation, System.Text.Json.JsonElement given, System.Text.Json.JsonElement args) -> System.Collections.Generic.IReadOnlyDictionary<string!, object?>!
+static Koine.Compiler.Services.ScenarioService.Run(Koine.Compiler.Ast.SemanticModel! semantic, string! target, string! operation, System.Text.Json.JsonElement given, System.Text.Json.JsonElement args, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.SourceFile>? sources = null) -> System.Collections.Generic.IReadOnlyDictionary<string!, object?>!
 static Koine.Compiler.Services.ScenarioService.WriteJson(System.Collections.Generic.IReadOnlyDictionary<string!, object?>! tree) -> string!
 static Koine.Compiler.Services.SyntaxTreeProvider.Build(Koine.Compiler.Ast.KoineNode! root, string! source) -> Koine.Compiler.Services.SyntaxTreeNode!
 static Koine.Compiler.Services.VersionInfo.Display(System.Reflection.Assembly! assembly) -> string!

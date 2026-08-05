@@ -669,6 +669,19 @@ public sealed partial class PythonEmitter
         var derived = members.Where(m => MemberAnalysis.IsDerived(m, memberNames)).ToList();
         var ordered = fields.OrderBy(m => HasDefault(m) ? 1 : 0).ToList();
 
+        // Per-member import hint for Assemble (issue #1742, the fifth call site of the
+        // #1701/#1712/#1716/#1718 gap): a member's own import must resolve against ITS declared
+        // type's context — the member's explicit `Context.Type` qualifier when present, else this
+        // event's own context — not unconditionally this event's own context. Like a repository or
+        // service (#1718), an event isn't tied to one entity's own field set, so it gets its own
+        // dictionary built from scratch.
+        var eventContext = ContextOf(ns);
+        var symbolContext = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (Member m in members)
+        {
+            CollectImportHints(m.Type, eventContext, symbolContext);
+        }
+
         var translator = new PythonExpressionTranslator(emit.Index, members, emit.EnumMemberToType, typeMapper, ContextOf(ns), regexMatchTimeoutMs: _options.RegexMatchTimeoutMs);
 
         var sb = new StringBuilder();
@@ -714,7 +727,7 @@ public sealed partial class PythonEmitter
 
         return new EmittedFile(
             PathFor(ns, KindFolder.Events, rawName),
-            Assemble(emit, ns, sb.ToString(), name),
+            Assemble(emit, ns, sb.ToString(), name, symbolContext),
             Kind: kind);
     }
 }

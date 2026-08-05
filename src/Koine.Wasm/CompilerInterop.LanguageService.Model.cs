@@ -291,9 +291,11 @@ public static partial class CompilerInterop
             using JsonDocument givenDoc = JsonDocument.Parse(string.IsNullOrWhiteSpace(givenJson) ? "{}" : givenJson);
             using JsonDocument argsDoc = JsonDocument.Parse(string.IsNullOrWhiteSpace(argsJson) ? "{}" : argsJson);
             var semantic = comp.SemanticModel;
+            var sources = comp.Documents.Select(kv => new SourceFile(kv.Key, kv.Value)).ToList();
             return ScenarioService.WriteJson(
                 ScenarioService.Run(
-                    semantic, target, operation, givenDoc.RootElement, argsDoc.RootElement, executionRequested: execute));
+                    semantic, target, operation, givenDoc.RootElement, argsDoc.RootElement,
+                    executionRequested: execute, sources: sources));
         }
         catch
         {
