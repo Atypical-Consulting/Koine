@@ -64,6 +64,7 @@ Koine.Compiler.ResultHoist.HoistTracker.Substitute(string! comparand, string! re
 Koine.Compiler.ResultHoist.HoistTracker.Substitute(string! renderedArgument, string! localRead) -> string!
 const Koine.Compiler.ResultHoist.LocalName = "__result" -> string!
 static Koine.Compiler.ResultHoist.ShouldSubstitute(string! renderedArgument, string? renderedResultExpr) -> bool
+static readonly Koine.Compiler.RouteDerivation.BodylessVerbs -> System.Collections.Generic.IReadOnlySet<string!>!
 static Koine.Compiler.RouteDerivation.ForCommand(Koine.Compiler.Ast.EntityDecl! entity, Koine.Compiler.Ast.CommandDecl! command) -> Koine.Compiler.RouteInfo
 static Koine.Compiler.RouteDerivation.ForFactory(Koine.Compiler.Ast.EntityDecl! entity, Koine.Compiler.Ast.FactoryDecl! factory) -> Koine.Compiler.RouteInfo
 static Koine.Compiler.RouteDerivation.ForQuery(Koine.Compiler.Ast.QueryDecl! query) -> Koine.Compiler.RouteInfo

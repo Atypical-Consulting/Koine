@@ -31,14 +31,6 @@ public sealed partial class CSharpEmitter
     };
 
     /// <summary>
-    /// The HTTP verbs ASP.NET refuses to <b>infer</b> a request body for. Mapping a complex parameter
-    /// through one of these without an explicit binding source throws at endpoint-build time — see
-    /// <see cref="BodyBindingAttributeFor"/>.
-    /// </summary>
-    private static readonly HashSet<string> BodylessVerbs =
-        new(StringComparer.OrdinalIgnoreCase) { "GET", "DELETE", "HEAD", "OPTIONS", "TRACE", "CONNECT" };
-
-    /// <summary>
     /// Emits one context's <c>&lt;Context&gt;Endpoints</c> extension (W2), or nothing when the context has
     /// no commands, factories or queries to map.
     /// </summary>
@@ -268,7 +260,8 @@ public sealed partial class CSharpEmitter
     }
 
     /// <summary>A query → <c>GET /{query}</c> bound to <c>&lt;Query&gt;Handler</c>; criteria come from the query
-    /// string. Honors the same R19 verb/route/role annotations as a command (#1219).</summary>
+    /// string for a body-less verb, or the JSON request body for a body-taking one (<see cref="QueryBodyBindingAttributeFor"/>,
+    /// #1961). Honors the same R19 verb/route/role annotations as a command (#1219).</summary>
     private bool WriteQueryEndpoint(StringBuilder body, ContextNode ctx, QueryDecl query, CSharpTypeMapper typeMapper, ModelIndex index, HashSet<(string Route, string Verb)> seenRoutes)
     {
         RouteInfo info = RouteDerivation.ForQuery(query);
@@ -285,15 +278,16 @@ public sealed partial class CSharpEmitter
         var i3 = i2 + Indent;
 
         // Route-bindable criteria (#1748): the same lifting WriteMutationEndpoint applies to a command's
-        // request, mirrored onto the [AsParameters] query record. A query has no aggregate identity, so
-        // every RouteTokenTarget here is Member or Unbound (never Identity — RouteDerivation.ForQuery
-        // never resolves one) — identityProperty is passed null accordingly.
+        // request, mirrored onto the query record regardless of its own [AsParameters]/[FromBody]
+        // binding (#1961). A query has no aggregate identity, so every RouteTokenTarget here is Member or
+        // Unbound (never Identity — RouteDerivation.ForQuery never resolves one) — identityProperty is
+        // passed null accordingly.
         (string routeParams, List<string> rebinds) = BuildRouteTokenBindings(
             body, i2, info.TokenBindings, identityProperty: null, typeMapper, index);
 
         body.Append(i2).Append("endpoints.").Append(MapMethodFor(info.Verb, "MapGet")).Append("(\"")
             .Append(EscapeCSharpString(info.Route)).Append("\", async (").Append(routeParams)
-            .Append("[AsParameters] ").Append(query.Name)
+            .Append(QueryBodyBindingAttributeFor(info.Verb)).Append(query.Name)
             .Append(" query, ").Append(query.Name).Append("Handler handler, CancellationToken ct) =>\n");
         body.Append(i2).Append("{\n");
 
@@ -334,7 +328,25 @@ public sealed partial class CSharpEmitter
     /// fully-qualified name, like the rest of this layer, so no <c>using</c> is added.</para>
     /// </summary>
     private static string BodyBindingAttributeFor(string verb) =>
-        BodylessVerbs.Contains(verb) ? "[Microsoft.AspNetCore.Mvc.FromBody] " : "";
+        RouteDerivation.BodylessVerbs.Contains(verb) ? "[Microsoft.AspNetCore.Mvc.FromBody] " : "";
+
+    /// <summary>
+    /// The binding-source attribute for a query's criteria record — the query-side counterpart to
+    /// <see cref="BodyBindingAttributeFor"/>: <c>[AsParameters]</c> (query-string binding, one source
+    /// per property) for the body-less verbs, <c>[Microsoft.AspNetCore.Mvc.FromBody]</c> (whole-record
+    /// JSON-body binding) otherwise.
+    ///
+    /// <para>A body-taking verb (<c>@post</c> etc., #1219) previously kept the unconditional
+    /// <c>[AsParameters]</c>, which resolves each criteria property from its own independent source —
+    /// a complex (value-object) property with no <c>TryParse</c>/<c>BindAsync</c> falls back to the raw
+    /// JSON request body while a sibling scalar/enum property still binds from the query string, under
+    /// the very same parameter. That split-source binding is undocumented and unreachable from a
+    /// spec-compliant OpenAPI client (#1961). Mirroring the mutation side's verb-aware rule gives the
+    /// whole criteria record one binding source per verb, matching what
+    /// <c>Koine.Emit.OpenApi</c>'s <c>QueryOperation</c> now documents.</para>
+    /// </summary>
+    private static string QueryBodyBindingAttributeFor(string verb) =>
+        RouteDerivation.BodylessVerbs.Contains(verb) ? "[AsParameters] " : "[Microsoft.AspNetCore.Mvc.FromBody] ";
 
     /// <summary>The <c>.RequireAuthorization("role")</c> suffix an <c>@auth</c> annotation adds to the endpoint's
     /// call chain, or the empty string when the operation carries none (#1219).</summary>

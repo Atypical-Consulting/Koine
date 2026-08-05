@@ -482,6 +482,24 @@ endpoints.MapDelete("/orders/{id}", async ([Microsoft.AspNetCore.Mvc.FromRoute(N
 
 ASP.NET only *infers* a complex parameter as the request body for verbs that define body semantics; for `GET`/`DELETE`/`HEAD`/`OPTIONS`/`TRACE`/`CONNECT` inferred-body binding is disabled, and an endpoint that relies on it throws `InvalidOperationException: Body was inferred but the method does not allow inferred body parameters` when the route table is built — at startup, not at compile time. The explicit attribute overrides that restriction. It is written by fully-qualified name, so the endpoints file needs no extra `using`. The body-taking verbs are untouched and keep the inferred binding.
 
+A **query** follows the mirror-image rule. Its criteria record binds with `[AsParameters]` — one query-string value per criterion — for the conventional `GET` and every other body-less verb, unchanged. For a body-taking verb (`@post`, `@put`, `@patch`), the *whole* record instead binds with an explicit `[Microsoft.AspNetCore.Mvc.FromBody]`, a single JSON body rather than per-criterion query-string values:
+
+```koine
+/// A read expressed as a POST because its criteria are too large for a query string.
+@post
+query OrdersInRange(range: DateRange, status: OrderStatus): List<OrderRow>
+```
+
+```csharp
+endpoints.MapPost("/orders-in-range", async ([Microsoft.AspNetCore.Mvc.FromBody] OrdersInRange query, OrdersInRangeHandler handler, CancellationToken ct) =>
+{
+    var result = await handler.HandleAsync(query, ct);
+    return Results.Ok(result);
+});
+```
+
+This mirrors the command-side rule above rather than reusing `[AsParameters]` for every verb, because `[AsParameters]` resolves a binding source **per property**: a criterion with no `TryParse`/`BindAsync` (a value object like `range` here) would silently fall back to being read from the raw request body while a sibling scalar/enum criterion kept reading from the query string — an undocumentable split that a client built from the OpenAPI document ([§15.9.2](#1592-translation-to-openapi)) could never reproduce correctly. A route-token criterion still lifts into its own `[FromRoute]` parameter ahead of the record either way, exactly as for a command.
+
 A token resolves by name against the declaration's own parameters/criteria first — `OrdinalIgnoreCase`, mirroring ASP.NET's own route-value binding — and only falls back to the aggregate identity for a bare `id` on a command with no `id`-named parameter of its own. A command parameter *named* `id` therefore wins the match: the token binds to it, not the identity, and the identity's own request property is pushed to `AggregateId` instead of colliding with it (`CSharpNaming.CommandIdProperty`, shared by the handler and the endpoint so the two can never disagree). Only a **route-bindable** type lifts into `[FromRoute]` — a scalar (`String`/`Int`/`Decimal`/`Bool`/`Instant`), an enum, or an identity value object, all `TryParse`-able. A token that matches a parameter typed as a general value object stays unbound, with an explanatory `// route token '{x}': <Type> is not route-bindable` comment in the emitted lambda rather than code that would not compile or would compile and fail to bind at request time. A query has no aggregate identity to fall back to, so only its criteria can ever bind one of its tokens — and neither has a factory, which mints the identity it creates rather than loading one, so only its parameters can.
 
 :::caution
@@ -535,7 +553,36 @@ paths:
       # …
 ```
 
-Every `{token}` in the path becomes a required `in: path` parameter — OpenAPI requires it, and a document that declares a templated path without them is rejected by validators. The token's ASP.NET syntax is stripped down to the bare name (`{id:int}`, `{id?}`, `{*rest}` are declared as `id`, `id`, `rest`) and each token is typed off what it resolves to — the same resolution the C# `api` layer binds ([§15.9.1](#1591-translation-to-c---layers-api)), so the two can never disagree: a token bound to a parameter/criterion gets that member's own schema, `{id}` here gets the aggregate identity's schema (a `Guid`-strategy identity ⇒ `type: string, format: uuid`; `Sequence` ⇒ `type: integer, format: int64`; a `Natural` key ⇒ its backing primitive), and an unbound token — `KOI1215`'s concern, not the document's — still falls back to a bare `type: string`. On a query, path parameters come first and the criteria follow as `in: query` ones in the same array.
+Every `{token}` in the path becomes a required `in: path` parameter — OpenAPI requires it, and a document that declares a templated path without them is rejected by validators. The token's ASP.NET syntax is stripped down to the bare name (`{id:int}`, `{id?}`, `{*rest}` are declared as `id`, `id`, `rest`) and each token is typed off what it resolves to — the same resolution the C# `api` layer binds ([§15.9.1](#1591-translation-to-c---layers-api)), so the two can never disagree: a token bound to a parameter/criterion gets that member's own schema, `{id}` here gets the aggregate identity's schema (a `Guid`-strategy identity ⇒ `type: string, format: uuid`; `Sequence` ⇒ `type: integer, format: int64`; a `Natural` key ⇒ its backing primitive), and an unbound token — `KOI1215`'s concern, not the document's — still falls back to a bare `type: string`. On a query, path parameters come first, then — for a body-less verb — the criteria follow as `in: query` parameters in the same array, matching the `[AsParameters]` binding above.
+
+For a **body-taking** query verb, the criteria instead document as a `requestBody` — the same `OrdersInRange` example from [§15.9.1](#1591-translation-to-c---layers-api):
+
+```yaml
+paths:
+  /orders-in-range:
+    post:
+      operationId: OrdersInRange
+      summary: "A read expressed as a POST because its criteria are too large for a query string."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                range:
+                  $ref: "#/components/schemas/DateRange"
+                status:
+                  $ref: "#/components/schemas/OrderStatus"
+              required:
+                - range
+                - status
+      responses:
+        "200":
+          # …
+```
+
+This is the exact shape a client generated strictly from the document needs to send — one JSON body carrying every criterion — matching the `[FromBody]` binding it documents, rather than the per-property split `[AsParameters]` produced before this rule existed. A route-token criterion stays an `in: path` parameter regardless of verb; only the *remaining* criteria move into the `requestBody`.
 
 Two declarations may point `@route` at the same path as long as their **verbs differ** — OpenAPI keys a path item by path and then by verb, so they merge under one key rather than colliding. Sharing a path *and* a verb is a `KOI1211` error: the document would carry the same verb key twice under one path (a duplicate YAML mapping key, which no parser will read), and the C# `api` layer would register two indistinguishable endpoints, which ASP.NET rejects with `AmbiguousMatchException` at request time.
 
