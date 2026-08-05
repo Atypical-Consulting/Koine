@@ -5,6 +5,7 @@ using System.Text.Json;
 using Koine.Cli;
 using Koine.Cli.Commands;
 using Koine.Compiler.Ast;
+using Koine.Compiler.Diagnostics;
 using Koine.Compiler.Emit;
 using Koine.Compiler.Services;
 
@@ -2314,5 +2315,141 @@ public class R18CSharpApplicationTests
     {
         var (assembly, errors) = TestSupport.Compile(Emit(ApiOn, BodylessVerbFixture("delete")));
         assembly.ShouldNotBeNull(string.Join("\n", errors));
+    }
+
+    // ------------------------------------------------------------------
+    // #1744 — a defensive, first-wins (route, verb) de-duplication guard,
+    // mirroring OpenApiEmitter.BuildPaths's own guard (#1219 code review).
+    // Two declarations resolving to the same (route, verb) is a KOI1211
+    // error, so a valid model never reaches here — but an emitter can be
+    // driven without the validator (the MCP/Studio hosts, a plugin
+    // pipeline), and unlike the OpenAPI side (an unparseable YAML document,
+    // loud at emit time), an unguarded C# api layer would compile fine and
+    // only fail at request time with AmbiguousMatchException.
+    // ------------------------------------------------------------------
+
+    /// <summary>
+    /// Mirrors <see cref="R18OpenApiEmitterTests.Two_operations_sharing_a_route_and_verb_never_emit_a_duplicate_mapping_key"/>:
+    /// the model is invalid (KOI1211), so the emitter is driven directly rather than through
+    /// <c>KoineCompiler.Compile</c>, which would reject it before reaching the emitter.
+    /// </summary>
+    [Fact]
+    public void Two_commands_sharing_a_route_and_verb_never_emit_a_duplicate_map_put()
+    {
+        const string src = """
+            context Ordering {
+              enum OrderStatus { Draft, Submitted, Cancelled }
+
+              aggregate Order root Order {
+                entity Order identified by OrderId {
+                  status: OrderStatus = Draft
+
+                  @route("/orders/{id}")
+                  @put
+                  command submit(note: String) {
+                    requires status == Draft "only a draft order can be submitted"
+                    status -> Submitted
+                  }
+
+                  @route("/orders/{id}")
+                  @put
+                  command amend(note: String) {
+                    requires status == Draft "only a draft order can be amended"
+                    status -> Draft
+                  }
+                }
+              }
+            }
+            """;
+
+        (KoineModel? model, IReadOnlyList<Diagnostic> diagnostics) = new KoineCompiler().Parse(src);
+        model.ShouldNotBeNull(string.Join("\n", diagnostics.Select(d => d.ToString())));
+
+        var endpoints = File(new CSharpEmitter(ApiOn).Emit(model!), "OrderingEndpoints.cs").Contents;
+
+        endpoints.Split('\n').Count(l => l.Contains("MapPut(\"/orders/{id}\"", StringComparison.Ordinal)).ShouldBe(1);
+        // First wins: the declaration that claimed the (route, verb) pair is the one that survives.
+        endpoints.ShouldContain("OrderSubmitRequest");
+        endpoints.ShouldNotContain("OrderAmendRequest");
+    }
+
+    /// <summary>
+    /// The guard's set is shared across all three writers, not one per writer (code review, #1744) — a
+    /// command and a factory colliding on the same (route, verb) must de-duplicate exactly like two
+    /// commands do. <c>EmitApiLayer</c> walks commands before factories, so the command wins.
+    /// </summary>
+    [Fact]
+    public void A_command_and_a_factory_sharing_a_route_and_verb_only_emit_the_first_writer_reached()
+    {
+        const string src = """
+            context Ordering {
+              enum OrderStatus { Draft, Submitted }
+
+              aggregate Order root Order {
+                entity Order identified by OrderId {
+                  status: OrderStatus = Draft
+
+                  @route("/orders/{id}")
+                  @put
+                  command submit(note: String) {
+                    requires status == Draft "only a draft order can be submitted"
+                    status -> Submitted
+                  }
+
+                  @route("/orders/{id}")
+                  @put
+                  create open(note: String) {}
+                }
+              }
+            }
+            """;
+
+        (KoineModel? model, IReadOnlyList<Diagnostic> diagnostics) = new KoineCompiler().Parse(src);
+        model.ShouldNotBeNull(string.Join("\n", diagnostics.Select(d => d.ToString())));
+
+        var endpoints = File(new CSharpEmitter(ApiOn).Emit(model!), "OrderingEndpoints.cs").Contents;
+
+        endpoints.Split('\n').Count(l => l.Contains("MapPut(\"/orders/{id}\"", StringComparison.Ordinal)).ShouldBe(1);
+        endpoints.ShouldContain("OrderSubmitRequest");
+        endpoints.ShouldNotContain("OrderOpenRequest");
+    }
+
+    /// <summary>Companion to the guard above: it keys on (route, verb), not route alone — the same route
+    /// with a different verb is a distinct pair, so both endpoints survive. This model is valid (the
+    /// verbs differ, so KOI1211 never fires), so it goes through the ordinary validated Compile path.</summary>
+    [Fact]
+    public void Same_route_with_different_verbs_still_emits_both_endpoints()
+    {
+        const string src = """
+            context Ordering {
+              enum OrderStatus { Draft, Submitted }
+
+              aggregate Order root Order {
+                entity Order identified by OrderId {
+                  status: OrderStatus = Draft
+
+                  @route("/orders/{id}")
+                  @put
+                  command submit(note: String) {
+                    requires status == Draft "only a draft order can be submitted"
+                    status -> Submitted
+                  }
+                }
+              }
+
+              readmodel OrderSummary from Order {
+                id
+                status
+              }
+
+              @route("/orders/{id}")
+              @get
+              query OrderById(id: OrderId): OrderSummary
+            }
+            """;
+
+        var endpoints = File(Emit(ApiOn, src), "OrderingEndpoints.cs").Contents;
+        endpoints.ShouldContain("MapPut(\"/orders/{id}\"");
+        endpoints.ShouldContain("MapGet(\"/orders/{id}\"");
     }
 }
