@@ -277,6 +277,28 @@ public class R9ValueObjectTests
         diags.ShouldContain(d => d.Code == DiagnosticCodes.RangeNotOrderable);
     }
 
+    [Fact]
+    public void A_context_local_value_named_Int_reports_KOI0908()
+    {
+        // #1883: KOI0908 only covered the four generics (List/Set/Map/Range); the five
+        // primitives (Int/String/Decimal/Bool/Instant) were reserved nowhere, so a value
+        // named `Int` validated clean and was silently unreachable (ClassifyBuiltIn always
+        // wins ahead of the user declaration). This asserts the primitive case now reports
+        // the same diagnostic as the generic case.
+        const string src = """
+            context Alpha {
+              value Int {
+                x: String
+              }
+              value Probe {
+                a: Int
+              }
+            }
+            """;
+
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.ReservedTypeName);
+    }
+
     // ======================================================================
     // R9.2 — Quantity value objects with unit-checked arithmetic
     // ======================================================================

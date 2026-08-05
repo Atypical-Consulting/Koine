@@ -307,12 +307,14 @@ public sealed class SemanticValidator
     /// </summary>
     internal static void ValidateUniqueTypeNames(KoineModel model, List<Diagnostic> diagnostics)
     {
-        // Names reserved for built-in generics; a user type with one of these would be
-        // shadowed by the built-in at resolution and silently mis-emit.
+        // Names reserved for built-in types (the four generics plus the five primitives); a
+        // user type with one of these would be shadowed by the built-in at resolution and
+        // silently mis-emit (ClassifyBuiltIn always wins ahead of a same-named declaration).
         var reserved = new HashSet<string>(StringComparer.Ordinal)
         {
             ModelIndex.ListTypeName, ModelIndex.SetTypeName, ModelIndex.MapTypeName, ModelIndex.RangeTypeName
         };
+        reserved.UnionWith(ModelIndex.Primitives);
 
         // Uniqueness is now PER CONTEXT (R13.2): two bounded contexts may each declare a
         // `Money`; only a name duplicated within one context is a collision.
@@ -324,7 +326,7 @@ public sealed class SemanticValidator
                 if (reserved.Contains(type.Name))
                 {
                     diagnostics.Add(Diagnostic.Error(DiagnosticCodes.ReservedTypeName,
-                        $"'{type.Name}' is a reserved built-in generic name and cannot name a type", type.Span));
+                        $"'{type.Name}' is a reserved built-in type name and cannot name a type", type.Span));
                 }
 
                 if (type is not AggregateDecl && !seen.Add(type.Name))
