@@ -271,20 +271,27 @@ internal sealed class RustExpressionTranslator
     }
 
     /// <summary>
-    /// Issue #1829: renders <c>l ?? r</c> with each operand numerically reconciled against the OTHER'S
-    /// type, mirroring Kotlin's <c>WriteCoalesce</c> (#1615), Java's <c>Optional.or</c>/<c>.orElse</c>
-    /// widening (#1548), and TypeScript's/Python's/PHP's #1762 — the one target this reconciliation
-    /// family had never reached. <c>l</c> is always <c>Option</c>-shaped (that is what makes <c>??</c>
-    /// meaningful), so its widen composes as an <c>Option::map</c> ahead of the combinator call
-    /// (<c>NeedsWiden</c> structurally never applies to the left operand — only
+    /// Renders <c>l ?? r</c>. Issue #1946: <c>l</c> is NOT always <c>Option</c>-shaped — Koine legally
+    /// allows a non-optional-declared left operand coalesced against an optional fallback — so this
+    /// first checks <c>leftType?.IsOptional == false</c> and, if so, collapses to just the (reconciled)
+    /// left operand instead of calling <c>.or_else</c>/<c>.unwrap_or_else</c> on a value that doesn't
+    /// have them (see the collapse branch below for the rationale).
+    /// <para>
+    /// Issue #1829: everything below the collapse branch is the pre-existing path, for when <c>l</c> IS
+    /// <c>Option</c>-shaped (the only case <c>??</c> historically had to handle). It renders each operand
+    /// numerically reconciled against the OTHER'S type, mirroring Kotlin's <c>WriteCoalesce</c> (#1615),
+    /// Java's <c>Optional.or</c>/<c>.orElse</c> widening (#1548), and TypeScript's/Python's/PHP's #1762.
+    /// Because <c>l</c> is optional on this path, its widen composes as an <c>Option::map</c> ahead of
+    /// the combinator call (<c>NeedsWiden</c> structurally never applies to the left operand here — only
     /// <see cref="BranchReconciliation.NeedsOptionalWiden"/> can, since <c>l</c>'s own inferred type is
-    /// always optional). The combinator choice itself is unchanged from #1333:
+    /// optional). The combinator choice itself is unchanged from #1333:
     /// <c>.unwrap_or_else(...)</c> (closure returns a bare value) when the right operand is non-optional,
     /// <c>.or_else(...)</c> (closure returns <c>Option&lt;T&gt;</c>) when it is itself optional — the
     /// right operand's OWN widen composes inside whichever closure shape that picks: a bare
     /// <c>Decimal::from(...)</c> wrap for <c>NeedsWiden</c>, or a <c>.map(Decimal::from)</c> for
     /// <c>NeedsOptionalWiden</c> (so a still-<c>None</c> optional fallback stays <c>None</c> rather than
     /// widening a value that isn't there).
+    /// </para>
     /// </summary>
     private void WriteCoalesce(CoalesceExpr co, StringBuilder sb)
     {
