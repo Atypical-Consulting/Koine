@@ -2605,11 +2605,11 @@ public class JavaConformanceTests
         """;
 
     /// <summary>
-    /// Every emitted reference to the colliding <c>Money</c> type — across all nine call-site families —
-    /// must carry <c>Shipping</c>'s package, never <c>Ordering</c>'s own same-named copy nor a bare
-    /// (unqualified) name. The ACL translator and the integration-event handler are asserted too, even
-    /// though they carry no name collision (their qualifier is grammar-mandatory), so a regression there
-    /// fails loudly in the same fixture.
+    /// Every emitted reference to the colliding <c>Money</c> type — across every call-site family the
+    /// fixture exercises — must carry <c>Shipping</c>'s package, never <c>Ordering</c>'s own same-named
+    /// copy nor a bare (unqualified) name. The ACL translator and the integration-event handler are
+    /// asserted too, even though they carry no name collision (their qualifier is grammar-mandatory), so
+    /// a regression there fails loudly in the same fixture.
     /// </summary>
     [Fact]
     public void Cross_context_qualifier_resolution_is_honored_across_every_java_call_site()
