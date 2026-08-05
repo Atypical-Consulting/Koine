@@ -53,7 +53,7 @@ import type { SelectedElement } from '@/model/selection';
 import { type ModelOutlineHandlers } from '@/model/modelOutline';
 import { mountDomainNavigator, type DomainNavigatorHandle, type TacticalHandlers } from '@/model/domainNavigator';
 import { type InspectorElement, type InspectorHandlers } from '@/model/inspector';
-import { buildModelIndex, lookupElement, resolveInspectableQn, type ModelIndex } from '@/model/modelIndex';
+import { buildModelIndex, lookupElement, resolveInspectableQn, type ModelElement, type ModelIndex } from '@/model/modelIndex';
 import { PropertiesPanel } from '@/model/PropertiesPanel';
 import type { SourceControlFocus } from '@/model/SourceControlPanel';
 import { SyntaxTreePanel } from '@/model/SyntaxTreePanel';
@@ -302,6 +302,31 @@ export interface InspectorController {
   init(): void;
   /** Cancel pending debounce/reset timers so a deferred repaint can't fire after the host is torn down. */
   dispose: () => void;
+}
+
+/**
+ * A tactical row's best jump-to-declaration span (#1737): the element's own diagram-node span when it
+ * names a file — the multi-file-correct choice — else a span built from the glossary NAME range on the
+ * ACTIVE document (`nameRange.start`/`end`, +1 to 1-based), mirroring `loadHistory`'s "prefer the
+ * element's own span, else the active file + name range" rule below (`inspectorHandlers.loadHistory`)
+ * so the two can't drift. Always returns a span (never `null`) since a glossary entry always carries a
+ * `nameRange` — `ModelOutlineHandlers.goto` stays the fallback for callers with no resolvable element at
+ * all (e.g. the Context Map's dangling relation endpoints).
+ */
+function bestJumpSpan(
+  element: ModelElement,
+  activeUri: string,
+): Pick<SourceSpan, 'file' | 'line' | 'column' | 'endLine' | 'endColumn'> {
+  const span = element.node?.sourceSpan;
+  if (span?.file) return span;
+  const { start, end } = element.entry.nameRange;
+  return {
+    file: activeUri,
+    line: start.line + 1,
+    column: start.character + 1,
+    endLine: end.line + 1,
+    endColumn: end.character + 1,
+  };
 }
 
 export function createInspectorController(deps: InspectorControllerDeps): InspectorController {
@@ -730,14 +755,15 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     // Select the node — derive its bounded context from the qualified-name prefix (the model graph
     // carries no separate context field), falling back to the active scope when the name is unqualified.
     onSelect: (node) => selection.set({ qualifiedName: node.qualifiedName, context: nodeContext(node) }),
-    // Resolve the node to the nearest inspectable element and jump to its declaration (the editor's
-    // 1-based goto contract; the glossary nameRange is 0-based, hence the +1). Unresolvable → no-op.
+    // Resolve the node to the nearest inspectable element and jump to its declaration — preferring the
+    // element's OWN span (correct even when it lives in a file other than the active editor, a
+    // multi-file workspace) over the active document (see bestJumpSpan above). Unresolvable → no-op.
     goto: (node) => {
       if (!modelIndex) return;
       const qn = resolveInspectableQn(modelIndex, node.qualifiedName);
-      const entry = qn ? lookupElement(modelIndex, qn)?.element.entry : undefined;
-      if (!entry) return;
-      modelOutlineHandlers.goto(entry.nameRange.start.line + 1, entry.nameRange.start.character + 1);
+      const element = qn ? lookupElement(modelIndex, qn)?.element : undefined;
+      if (!element) return;
+      modelOutlineHandlers.gotoSourceSpan(bestJumpSpan(element, deps.activeUri()));
     },
     reveal: (node) => deps.revealInFiles(nodeContext(node)),
     setAxis: (axis) => centerDeck.setAxis(axis),
