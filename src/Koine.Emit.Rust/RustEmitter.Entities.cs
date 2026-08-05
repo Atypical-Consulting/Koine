@@ -821,7 +821,7 @@ public sealed partial class RustEmitter
             {
                 var expectedEnum = ExpectedEnum(m.Type, index, translator.Context);
                 var owned = translator.TranslateOwned(value, expectedEnum);
-                TypeRef? valueType = translator.InferType(value);
+                TypeRef? valueType = translator.InferRenderedType(value);
                 args.Add(ReconcileFactoryCtorArg(valueType, m.Type, owned));
             }
             else if (factory.Parameters.FirstOrDefault(p => MemberAnalysis.AutoBinds(p, m)) is { } boundParam)
@@ -852,7 +852,7 @@ public sealed partial class RustEmitter
             {
                 var expectedEnum = ExpectedEnum(m.Type, index, translator.Context);
                 var owned = translator.TranslateOwned(value, expectedEnum);
-                TypeRef? valueType = translator.InferType(value);
+                TypeRef? valueType = translator.InferRenderedType(value);
 
                 // The ctor parameter is unconditionally Option<T> regardless of the member's own
                 // declared optionality (see the `m.Type with { IsOptional = true }` precedent below at
