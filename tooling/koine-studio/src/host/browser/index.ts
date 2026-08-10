@@ -37,6 +37,12 @@ export class BrowserPlatform implements Platform {
   // A browser tab cannot spawn a host shell, so there is no integrated terminal: the panel shows a
   // graceful "desktop only" placeholder. `createTerminal` is deliberately omitted (not implemented).
   readonly canRunShell = false;
+  // Same reason, and it is the protocol's constraint rather than ours: ACP's only stable transport is
+  // stdio (streamable HTTP is a draft proposal, and there is no WebSocket transport), so hosting an
+  // agent means spawning a child — which a tab cannot do. `createAcpTransport` is deliberately omitted
+  // (not implemented). This is why ADR 0022 drops the assistant from the web build outright instead of
+  // degrading it: unlike scenario execution, there is no weaker answer to fall back to.
+  readonly canHostAgents = false;
 
   // A browser tab can neither listen as a server nor dial a peer, so it cannot broker a co-editing
   // session (#481): `createCollabTransport` is deliberately omitted and the collaboration affordance

@@ -77,6 +77,43 @@ export interface LspTransport {
 }
 
 /**
+ * How a host is told to launch an ACP coding agent (#1970, ADR 0022). Mirrors the Rust `AgentSpec`
+ * verbatim — `env` is an ordered `name`/`value` list rather than a map because that is the shape ACP
+ * itself uses for both agent env and MCP server config, and a map would not round-trip duplicates.
+ */
+export interface AgentSpec {
+  /** The executable to run (`npx`, `goose`, an absolute path…). */
+  command: string;
+  args?: string[];
+  env?: { name: string; value: string }[];
+  /** Working directory for the agent; the workspace root in practice. Omitted inherits the host's. */
+  cwd?: string;
+}
+
+/**
+ * Transport for an ACP coding agent. The desktop host spawns the agent as a child and brokers
+ * newline-delimited JSON-RPC over Tauri IPC (`acp_start`/`acp_send`/`acp_stop` +
+ * `acp://message`/`acp://exit`); a browser tab cannot spawn a child, so it offers no transport at all
+ * (see {@link Platform.createAcpTransport}).
+ *
+ * There is no `onRestart` counterpart to {@link LspTransport}'s, and that asymmetry is the point: an
+ * agent owns conversation state and an authenticated session, so the host never relaunches one behind
+ * the client's back — a dead agent surfaces through `onExit` and the UI decides what to do.
+ */
+export interface AcpTransport {
+  /** Spawn the agent described by `spec`. Resolves once it is ready to receive `send`. */
+  start: (spec: AgentSpec) => Promise<void>;
+  /** Send one serialized JSON-RPC message to the agent. */
+  send(message: string): Promise<void>;
+  /** Register the handler for every agent→client message (JSON string). Call before `start`. */
+  onMessage(cb: (json: string) => void): void;
+  /** Register the handler for the agent exiting (its exit code). Call before `start`. */
+  onExit(cb: (code: number) => void): void;
+  /** Kill the agent and detach listeners. */
+  stop: () => Promise<void>;
+}
+
+/**
  * Transport for the integrated terminal's pseudo-terminal (PTY). The desktop host brokers a real
  * shell over Tauri IPC (`pty_start`/`pty_write`/`pty_resize`/`pty_stop` + `pty://data`/`pty://exit`
  * events); the browser has no host shell, so it offers no transport at all (see
@@ -300,6 +337,24 @@ export interface Platform {
    * before invoking it.
    */
   createTerminal?: () => TerminalTransport;
+
+  /**
+   * Whether this host can run an ACP coding agent (#1970, ADR 0022). True on the Tauri desktop, which
+   * spawns the agent as a child process; **false in a browser tab**, and not for want of effort —
+   * stdio is ACP's only stable transport (streamable HTTP is a draft proposal, and there is no
+   * WebSocket transport), and a tab cannot spawn a child. That is why ADR 0022 scopes agent hosting to
+   * the desktop and drops the assistant from the web build outright, rather than degrading it. Gates
+   * {@link createAcpTransport} — true iff that factory exists, exactly as {@link canRunShell} gates
+   * {@link createTerminal}. Never branch on {@link kind}.
+   */
+  readonly canHostAgents: boolean;
+
+  /**
+   * Create an ACP transport (one per agent session) for hosts that {@link canHostAgents}. Hosts that
+   * cannot spawn a child omit it entirely, so callers must guard on the flag (or the optional chain)
+   * first.
+   */
+  createAcpTransport?: () => AcpTransport;
 
   /**
    * Whether this host can broker a real-time co-editing session (issue #481) — true iff it can relay
