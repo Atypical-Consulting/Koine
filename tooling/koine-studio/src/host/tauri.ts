@@ -122,6 +122,15 @@ class TauriAcpTransport implements AcpTransport {
     // Detach any previous pair first — `start` is re-entered when the user switches agents.
     this.unlistenMsg?.();
     this.unlistenExit?.();
+    // Then stop whatever was running. `acp_start` REFUSES while an agent is alive (it will not
+    // silently keep the old child under the new spec), so switching agents is stop-then-start and
+    // this is where that contract is honoured. `acp_stop` is idempotent, so the first start pays only
+    // one no-op round-trip for it.
+    try {
+      await invoke('acp_stop');
+    } catch {
+      // nothing was running, or the host is gone — either way `acp_start` below is the real gate
+    }
     this.unlistenMsg = await listen<string>('acp://message', (e) => this.msgCb?.(e.payload));
     this.unlistenExit = await listen<number>('acp://exit', (e) =>
       this.exitCb?.(typeof e.payload === 'number' ? e.payload : -1),

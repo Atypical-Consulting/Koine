@@ -350,9 +350,14 @@ export interface Platform {
   readonly canHostAgents: boolean;
 
   /**
-   * Create an ACP transport (one per agent session) for hosts that {@link canHostAgents}. Hosts that
-   * cannot spawn a child omit it entirely, so callers must guard on the flag (or the optional chain)
-   * first.
+   * Create an ACP transport for hosts that {@link canHostAgents}. Hosts that cannot spawn a child omit
+   * it entirely, so callers must guard on the flag (or the optional chain) first.
+   *
+   * **At most one transport may be started at a time**, per process — not one per session. The desktop
+   * broker owns a single agent child and its `acp://` events are app-global, so two started transports
+   * would each receive every message from the one agent and interleave two JSON-RPC id spaces into its
+   * stdin. `acp_start` refuses a second agent, which turns that into an error rather than silent
+   * cross-talk; a caller that wants a different agent must `stop()` first.
    */
   createAcpTransport?: () => AcpTransport;
 

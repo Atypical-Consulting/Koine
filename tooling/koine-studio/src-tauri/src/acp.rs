@@ -28,8 +28,8 @@
 // cannot spawn a child, so it cannot speak ACP at all.
 
 use std::io::{self, BufRead, BufReader, Write};
-use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::process::{Child, ChildStdin, ChildStdout, Command, ExitStatus, Stdio};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -74,8 +74,8 @@ impl AgentSpec {
 
 // --- managed state ----------------------------------------------------------
 
-/// State for the ACP agent child. One agent at a time: `acp_start` is idempotent and a second call
-/// while one runs is a no-op, so the frontend switches agents by stopping and starting.
+/// State for the ACP agent child. **One agent at a time**, and `acp_start` REFUSES rather than
+/// silently ignoring a second spec — see its doc comment for why that must not be a no-op.
 #[derive(Default)]
 pub struct AcpState {
     /// stdin handle of the running child; `None` until `acp_start` succeeds.
@@ -85,6 +85,15 @@ pub struct AcpState {
     /// Set once the user/app asks to stop; tells the reader thread the EOF was intentional so it
     /// reports a clean exit rather than a crash. Shared `Arc` — managed `State` is not `'static`.
     pub shutting_down: Arc<AtomicBool>,
+    /// Bumped on every `acp_start`. A reader thread captures the value it was spawned under and
+    /// touches nothing once it no longer matches.
+    ///
+    /// Without this, a thread left draining agent A's stdout can outlive `acp_stop`, observe the
+    /// `shutting_down` flag that `acp_start` has ALREADY reset for agent B, and then take B's live
+    /// child out of the state and block reaping it — emitting a bogus `acp://exit` for an agent that
+    /// is running, and leaving B unkillable. The PTY broker learned the same lesson in #829/#830;
+    /// this is that guard, carried over rather than rediscovered.
+    pub generation: Arc<AtomicU64>,
 }
 
 // --- pure framing functions (the cargo test gate) ---------------------------
@@ -128,13 +137,49 @@ pub fn read_line_frame<R: BufRead>(r: &mut R) -> io::Result<Option<String>> {
 
 // --- spawning ---------------------------------------------------------------
 
+/// Build the `Command` for `program`.
+///
+/// On Windows this routes through `cmd /C`, and that is not incidental: `npx` is a `.cmd` shim, and
+/// since Rust 1.77 `Command` no longer resolves batch files implicitly — so a bare `npx` fails with a
+/// bare "program not found". Two of the three agents ADR 0022 ships by default are `npx …`, so
+/// without this the feature simply does not exist on Windows. The command already comes from the
+/// user's own agent registry, so routing it through the shell widens no trust boundary that
+/// `acp_start` had not already opened (see `AgentSpec::validate`).
+#[cfg(windows)]
+fn program_command(program: &str) -> Command {
+    let mut cmd = Command::new("cmd");
+    cmd.arg("/C").arg(program);
+    cmd
+}
+
+#[cfg(not(windows))]
+fn program_command(program: &str) -> Command {
+    Command::new(program)
+}
+
+/// The exit code to report for a finished child.
+///
+/// A child killed by a signal has no exit code at all on Unix, and reporting the `-1` we use for
+/// "could not determine" would make "the OOM killer took your agent" indistinguishable from "the host
+/// lost track of it". Signals are reported as `128 + signo`, the shell convention.
+fn exit_code_of(status: ExitStatus) -> i32 {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::ExitStatusExt;
+        if let Some(signal) = status.signal() {
+            return 128 + signal;
+        }
+    }
+    status.code().unwrap_or(-1)
+}
+
 /// Spawn the agent with the broker's stdio wiring and detach its stdin/stdout. stderr is inherited so
 /// an agent's own diagnostics reach the host's console instead of filling an unread pipe and blocking
 /// the child once the OS buffer is full.
 fn spawn_agent(spec: &AgentSpec) -> Result<(Child, ChildStdin, ChildStdout), String> {
     spec.validate()?;
 
-    let mut cmd = Command::new(spec.command.trim());
+    let mut cmd = program_command(spec.command.trim());
     cmd.args(&spec.args)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -157,32 +202,67 @@ fn spawn_agent(spec: &AgentSpec) -> Result<(Child, ChildStdin, ChildStdout), Str
 /// Spawn the reader thread: split messages off `stdout`, re-emit each as `acp://message`, and when the
 /// stream ends reap the child and emit `acp://exit` with its real exit code. It never relaunches —
 /// see the module header for why that is the point rather than a gap.
-fn spawn_reader_thread(app: AppHandle, stdout: ChildStdout, shutting_down: Arc<AtomicBool>) {
+fn spawn_reader_thread(
+    app: AppHandle,
+    stdout: ChildStdout,
+    shutting_down: Arc<AtomicBool>,
+    generation: Arc<AtomicU64>,
+    my_generation: u64,
+) {
     std::thread::spawn(move || {
         let mut reader = BufReader::new(stdout);
+        // Distinguishes "the child closed its stdout" from "we can no longer read it". They are NOT
+        // the same event, and treating them alike is what orphans an agent (see below).
+        let mut read_failed = false;
         loop {
             match read_line_frame(&mut reader) {
                 Ok(Some(body)) => {
                     let _ = app.emit("acp://message", body);
                 }
-                Ok(None) => break, // clean EOF
-                Err(_) => break,   // malformed / IO error — the child is gone either way
+                Ok(None) => break, // clean EOF — the child closed stdout, so it is exiting
+                Err(_) => {
+                    read_failed = true;
+                    break;
+                }
             }
         }
 
-        // Reap the child so the exit code we report is the real one, not a guess. An intentional stop
-        // has already taken and killed it, in which case there is nothing to wait on and 0 is correct.
-        let code = if shutting_down.load(Ordering::SeqCst) {
-            0
-        } else {
-            app.state::<AcpState>()
-                .child
-                .lock()
-                .ok()
-                .and_then(|mut g| g.take())
-                .and_then(|mut c| c.wait().ok())
-                .and_then(|status| status.code())
-                .unwrap_or(-1)
+        // A newer agent has since been started: this thread belongs to a previous one and must not
+        // touch shared state, or it would reap ITS successor's child. See `AcpState::generation`.
+        if generation.load(Ordering::SeqCst) != my_generation {
+            return;
+        }
+
+        // An intentional stop already took and killed the child, so there is nothing to reap and 0 is
+        // the honest code.
+        if shutting_down.load(Ordering::SeqCst) {
+            let _ = app.emit("acp://exit", 0i32);
+            return;
+        }
+
+        let taken = app
+            .state::<AcpState>()
+            .child
+            .lock()
+            .ok()
+            .and_then(|mut guard| guard.take());
+
+        let code = match taken {
+            Some(mut child) => {
+                // CRITICAL: a read error does NOT mean the child exited — `BufRead::read_line` fails
+                // on a single non-UTF-8 byte, which a third-party agent can emit at any time. We have
+                // just taken the child OUT of the managed state, so nothing else can ever reach it;
+                // waiting on a still-running agent here would block this thread for the agent's whole
+                // life, never emit `acp://exit`, leave `acp_stop` with nothing to kill, and let the
+                // next `acp_start` spawn a second agent alongside the orphan. So on a read failure we
+                // kill first and reap after. A clean EOF needs no kill: the child is already on its
+                // way out and `wait` returns promptly.
+                if read_failed {
+                    let _ = child.kill();
+                }
+                child.wait().map(exit_code_of).unwrap_or(-1)
+            }
+            None => -1,
         };
         let _ = app.emit("acp://exit", code);
     });
@@ -190,8 +270,15 @@ fn spawn_reader_thread(app: AppHandle, stdout: ChildStdout, shutting_down: Arc<A
 
 // --- tauri commands ---------------------------------------------------------
 
-/// Start the configured agent. Idempotent: the `child` lock is held across the whole
-/// check-spawn-store, so two concurrent calls cannot both pass the guard and spawn duplicate agents.
+/// Start the configured agent. The `child` lock is held across the whole check-spawn-store, so two
+/// concurrent calls cannot both pass the guard and spawn duplicate agents.
+///
+/// A second call while an agent runs **fails** rather than returning `Ok(())`. That distinction is
+/// load-bearing: the caller's `spec` names WHICH agent to run, so silently keeping the old child
+/// would leave Studio negotiating `initialize`/`session/new` against agent A — its capabilities, its
+/// provider, its API key — while the UI showed agent B, with nothing anywhere reporting the mismatch.
+/// Switching agents is stop-then-start, and this error is what makes that contract enforced instead
+/// of merely documented.
 #[tauri::command]
 pub fn acp_start(
     app: AppHandle,
@@ -200,16 +287,27 @@ pub fn acp_start(
 ) -> Result<(), String> {
     let mut child_guard = state.child.lock().map_err(|e| e.to_string())?;
     if child_guard.is_some() {
-        return Ok(());
+        return Err(
+            "an ACP agent is already running — stop it before starting another".to_string(),
+        );
     }
 
     state.shutting_down.store(false, Ordering::SeqCst);
+    // Claim a generation BEFORE spawning, so the thread we are about to create owns the state and any
+    // thread still draining a previous agent is already stale.
+    let my_generation = state.generation.fetch_add(1, Ordering::SeqCst) + 1;
 
     let (child, stdin, stdout) = spawn_agent(&spec)?;
     *state.stdin.lock().map_err(|e| e.to_string())? = Some(stdin);
     *child_guard = Some(child); // stored while still holding the guard => atomic
 
-    spawn_reader_thread(app.clone(), stdout, state.shutting_down.clone());
+    spawn_reader_thread(
+        app.clone(),
+        stdout,
+        state.shutting_down.clone(),
+        state.generation.clone(),
+        my_generation,
+    );
     Ok(())
 }
 
@@ -348,6 +446,31 @@ mod tests {
         assert!(spec.args.is_empty());
         assert!(spec.env.is_empty());
         assert_eq!(spec.cwd, None);
+    }
+
+    // --- exit_code_of ---------------------------------------------------------
+
+    #[test]
+    fn exit_code_of_reports_a_normal_exit_code_verbatim() {
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::ExitStatusExt;
+            // Wait-status encoding: the exit code lives in the high byte.
+            assert_eq!(exit_code_of(ExitStatus::from_raw(3 << 8)), 3);
+            assert_eq!(exit_code_of(ExitStatus::from_raw(0)), 0);
+        }
+    }
+
+    #[test]
+    fn exit_code_of_distinguishes_a_signal_from_an_unknown_code() {
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::ExitStatusExt;
+            // SIGKILL (9) — an OOM kill must not be reported as -1, which is what the host uses for
+            // "could not determine"; 128+signo is the shell convention and is unambiguous.
+            assert_eq!(exit_code_of(ExitStatus::from_raw(9)), 137);
+            assert_ne!(exit_code_of(ExitStatus::from_raw(9)), -1);
+        }
     }
 
     #[test]

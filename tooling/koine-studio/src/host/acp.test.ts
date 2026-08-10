@@ -75,10 +75,29 @@ describe('TauriAcpTransport', () => {
     expect(invokeMock).toHaveBeenCalledWith('acp_start', { spec: SPEC });
 
     // Ordering matters: a message emitted between spawn and subscribe would be lost, and the agent's
-    // `initialize` response is the very first thing on the wire.
-    const listenOrder = listenMock.mock.invocationCallOrder;
-    const invokeOrder = invokeMock.mock.invocationCallOrder;
-    expect(Math.max(...listenOrder)).toBeLessThan(Math.min(...invokeOrder));
+    // `initialize` response is the very first thing on the wire. Compare against `acp_start`
+    // specifically — `acp_stop` legitimately runs BEFORE the listeners (see below).
+    const startIndex = invokeMock.mock.calls.findIndex(([cmd]) => cmd === 'acp_start');
+    const startOrder = invokeMock.mock.invocationCallOrder[startIndex];
+    expect(Math.max(...listenMock.mock.invocationCallOrder)).toBeLessThan(startOrder);
+  });
+
+  // `acp_start` refuses while an agent is alive rather than silently keeping the old child under the
+  // new spec, so switching agents MUST be stop-then-start. If the transport skipped this, a switch
+  // would leave Studio talking to the previous agent while the UI showed the new one.
+  it('stops any running agent before starting, so a switch cannot keep the old child', async () => {
+    const transport = new TauriPlatform().createAcpTransport();
+    await transport.start(SPEC);
+
+    const commands = invokeMock.mock.calls.map(([cmd]) => cmd as string);
+    expect(commands).toEqual(['acp_stop', 'acp_start']);
+  });
+
+  it('a host that rejects the pre-emptive stop does not block the start', async () => {
+    const transport = new TauriPlatform().createAcpTransport();
+    invokeMock.mockRejectedValueOnce(new Error('nothing running'));
+    await expect(transport.start(SPEC)).resolves.toBeUndefined();
+    expect(invokeMock).toHaveBeenCalledWith('acp_start', { spec: SPEC });
   });
 
   it('delivers agent→client messages to the registered handler', async () => {
