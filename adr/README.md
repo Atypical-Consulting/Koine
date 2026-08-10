@@ -30,6 +30,7 @@ the codebase survives long after the conversation or PR that produced it.
 | [0018](0018-collaboration-fan-out-is-per-peer-queues-with-a-bounded-backlog.md) | Collaboration fan-out is per-peer queues with a bounded backlog | Proposed |
 | [0019](0019-publish-is-a-distinct-clause-from-emit.md) | A command publishes an integration event through a distinct `publish` clause, not a widened `emit` | Proposed |
 | [0021](0021-one-path-containment-primitive-per-host.md) | One path-containment primitive per host, enforced by a build gate | Proposed |
+| [0022](0022-studio-hosts-coding-agents-over-acp-on-desktop.md) | Studio hosts coding agents over ACP on desktop, and drops the assistant on web | Proposed |
 
 ## When to write one
 
