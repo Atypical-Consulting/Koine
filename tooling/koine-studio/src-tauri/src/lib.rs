@@ -14,6 +14,7 @@
 // suppresses the restart so teardown stays clean. `lsp://exit` is emitted only once
 // the retry budget is exhausted (or after a clean stop).
 
+mod acp;
 mod collab;
 mod noise;
 // `pub` unlike its siblings: this module is a self-contained security primitive, and exporting it
@@ -2628,6 +2629,7 @@ pub fn run() {
         .manage(McpState::default())
         .manage(PtyState::default())
         .manage(CollabState::default())
+        .manage(acp::AcpState::default())
         .setup(|app| {
             // Make the Koine logo show in the macOS Dock even under `tauri dev`
             // (an unbundled run has no Info.plist/icns to source it from).
@@ -2660,6 +2662,9 @@ pub fn run() {
             lsp_start,
             lsp_send,
             lsp_stop,
+            acp::acp_start,
+            acp::acp_send,
+            acp::acp_stop,
             mcp_endpoint,
             mcp_stop,
             pty_start,

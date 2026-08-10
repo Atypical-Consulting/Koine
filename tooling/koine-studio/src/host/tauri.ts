@@ -10,6 +10,8 @@ import { appDataDir, documentDir, join } from '@tauri-apps/api/path';
 import { open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog';
 import { openUrl, revealItemInDir } from '@tauri-apps/plugin-opener';
 import type {
+  AcpTransport,
+  AgentSpec,
   FsEntry,
   GitLogEntry,
   GitNumstatEntry,
@@ -83,6 +85,70 @@ class TauriLspTransport implements LspTransport {
     // idempotent and safe when nothing is running; errors are swallowed.
     try {
       await invoke('lsp_stop');
+    } catch {
+      // best effort — the host may already be gone
+    }
+  }
+}
+
+/**
+ * ACP transport over Tauri IPC (#1970, ADR 0022). Mirrors {@link TauriLspTransport}: the Rust broker
+ * streams the agent's stdout over `acp://message` and announces its death over `acp://exit`, while
+ * outbound messages and teardown go out as `acp_*` invoke commands.
+ *
+ * Listeners are attached in `start` BEFORE `acp_start` — the agent's `initialize` response is the very
+ * first thing on the wire, so subscribing after the spawn would race it away — and a re-`start` on the
+ * same instance detaches the previous pair first, so a restarted agent cannot deliver every message
+ * twice through a leaked listener.
+ *
+ * There is deliberately no `onRestart`: unlike the language server, an agent is never relaunched
+ * behind the client's back (see the Rust module header).
+ */
+class TauriAcpTransport implements AcpTransport {
+  private msgCb?: (json: string) => void;
+  private exitCb?: (code: number) => void;
+  private unlistenMsg?: UnlistenFn;
+  private unlistenExit?: UnlistenFn;
+
+  onMessage(cb: (json: string) => void): void {
+    this.msgCb = cb;
+  }
+
+  onExit(cb: (code: number) => void): void {
+    this.exitCb = cb;
+  }
+
+  async start(spec: AgentSpec): Promise<void> {
+    // Detach any previous pair first — `start` is re-entered when the user switches agents.
+    this.unlistenMsg?.();
+    this.unlistenExit?.();
+    // Then stop whatever was running. `acp_start` REFUSES while an agent is alive (it will not
+    // silently keep the old child under the new spec), so switching agents is stop-then-start and
+    // this is where that contract is honoured. `acp_stop` is idempotent, so the first start pays only
+    // one no-op round-trip for it.
+    try {
+      await invoke('acp_stop');
+    } catch {
+      // nothing was running, or the host is gone — either way `acp_start` below is the real gate
+    }
+    this.unlistenMsg = await listen<string>('acp://message', (e) => this.msgCb?.(e.payload));
+    this.unlistenExit = await listen<number>('acp://exit', (e) =>
+      this.exitCb?.(typeof e.payload === 'number' ? e.payload : -1),
+    );
+    await invoke('acp_start', { spec });
+  }
+
+  send(message: string): Promise<void> {
+    return invoke('acp_send', { message });
+  }
+
+  async stop(): Promise<void> {
+    this.unlistenMsg?.();
+    this.unlistenExit?.();
+    this.unlistenMsg = undefined;
+    this.unlistenExit = undefined;
+    try {
+      await invoke('acp_stop');
     } catch {
       // best effort — the host may already be gone
     }
@@ -270,6 +336,10 @@ export class TauriPlatform implements Platform {
   readonly persistsWorkspace = true;
   // The desktop shell brokers a real PTY (see TauriTerminalTransport / the Rust pty_* commands).
   readonly canRunShell = true;
+  // The desktop shell can spawn an ACP coding agent as a child and broker its stdio (see
+  // TauriAcpTransport / the Rust acp_* commands), which is the whole reason ADR 0022 puts agent
+  // hosting here and nowhere else.
+  readonly canHostAgents = true;
   // Real-time co-editing (#481). The desktop shell brokers the session itself — the Rust `collab_*`
   // commands bind a listener and fan CRDT updates and presence between participants — so the capability
   // is unconditionally available here, exactly like the PTY. A configured relay changes WHICH broker
@@ -290,6 +360,10 @@ export class TauriPlatform implements Platform {
 
   createTerminal(): TerminalTransport {
     return new TauriTerminalTransport();
+  }
+
+  createAcpTransport(): AcpTransport {
+    return new TauriAcpTransport();
   }
 
   createCollabTransport(): CollabTransport {

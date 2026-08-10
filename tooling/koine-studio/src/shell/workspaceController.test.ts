@@ -57,6 +57,7 @@ class FakePlatform implements Platform {
   readonly canOpenFolders = true;
   readonly canSaveProjects = true;
   readonly canRunShell = false;
+  readonly canHostAgents = false;
   readonly canCollaborate = false;
   readonly supportsScenarioExecution = false;
   // Declared `boolean` (not the `false` literal) so the GitCapablePlatform subclass below can override it
