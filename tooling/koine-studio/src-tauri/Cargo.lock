@@ -1964,9 +1964,9 @@ dependencies = [
 
 [[package]]
 name = "koine-studio"
-version = "0.250.0"
+version = "0.251.0"
 dependencies = [
- "getrandom 0.3.4",
+ "getrandom 0.4.3",
  "nix 0.31.3",
  "objc2",
  "objc2-app-kit",
