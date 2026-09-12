@@ -10,7 +10,7 @@ val lsp4ijVersion: String by project
 val kotlinVersion: String by project
 
 plugins {
-    kotlin("jvm") version "2.4.10"
+    kotlin("jvm") version "2.4.20"
     id("org.jetbrains.intellij.platform") version "2.18.1"
 }
 
