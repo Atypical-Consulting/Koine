@@ -47,7 +47,7 @@
     "@testing-library/preact": "^3.2.4",
     "@types/node": "^24.0.0",
     "axe-core": "^4.12.1",
-    "happy-dom": "^20.10.6",
+    "happy-dom": "^21.0.0",
     "preact": "^10.24.0",
     "storybook": "^10.4.6",
     "typescript": "~7.0.0",
